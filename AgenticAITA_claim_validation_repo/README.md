@@ -11,11 +11,22 @@ python validate_claims.py --out results
 pytest -q
 ```
 
+To validate a downloaded market-data SQLite store separately from the paper aggregate checks:
+
+```bash
+python validate_claims.py --market-db ../data/hyperliquid_ohlcv/market_data.sqlite --out results
+```
+
+The real-data path keeps pass/fail checks limited to downloaded data coverage and funding availability. AZTE/CBD trigger and diversification rows are reported as exploratory reconstruction metrics because public market data cannot recover the original L2 order book snapshots, LLM decisions, or paper SQLite trade logs.
+
 ## Outputs
 
 - `results/validation_report.md`
 - `results/validation_results.json`
 - `results/validation_results.csv`
+- `results/real_data_validation_report.md` when `--market-db` is used
+- `results/real_data_validation_results.json` when `--market-db` is used
+- `results/real_data_validation_results.csv` when `--market-db` is used
 
 ## Interpretation
 

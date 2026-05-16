@@ -70,3 +70,21 @@ python scripts/compute_azte_cbd_metrics.py --per-symbol
 ```
 
 Warmup rows are retained and marked explicitly. CBD fields are populated only when a BTC candle exists at the same timestamp and enough aligned BTC/asset observations are available; otherwise `cbd_status` records the limitation.
+
+## Real-Data Validation CLI
+
+The paper-aggregate validation remains unchanged:
+
+```bash
+cd AgenticAITA_claim_validation_repo
+python validate_claims.py --out results
+```
+
+After downloading market data, run the separate real-data validation mode against the SQLite store:
+
+```bash
+cd AgenticAITA_claim_validation_repo
+python validate_claims.py --market-db ../data/hyperliquid_ohlcv/market_data.sqlite --out results
+```
+
+This writes `real_data_validation_report.md`, `real_data_validation_results.json`, and `real_data_validation_results.csv`. Coverage and funding availability are pass/fail or unsupported checks; AZTE/CBD outputs are exploratory reconstruction metrics. The report explicitly caveats that public OHLCV/funding data cannot recover original L2 order book snapshots, LLM decisions, or the paper's original SQLite dry-run logs.
