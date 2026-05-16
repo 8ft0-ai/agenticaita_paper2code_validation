@@ -12,6 +12,7 @@ from pathlib import Path
 
 from scripts.fetch_hyperliquid_ohlcv import (
     build_coverage_report,
+    fetch_symbol_funding_rates,
     fetch_symbol_candles,
     resolve_active_swap_symbols,
     run_download,
@@ -45,6 +46,20 @@ class FakeExchange:
         ]
         return [row for row in rows if row[0] >= since][:limit]
 
+    def fetch_funding_rate_history(self, symbol, since=None, limit=1000):
+        if symbol == "ETH/USDC:USDC":
+            return []
+        rows = [
+            {"timestamp": 0, "fundingRate": 0.0001},
+            {"timestamp": 60_000, "fundingRate": -0.0002},
+            {"timestamp": 120_000, "fundingRate": 0.0003},
+        ]
+        return [row for row in rows if row["timestamp"] >= since][:limit]
+
+
+class NoFundingExchange(FakeExchange):
+    fetch_funding_rate_history = None
+
 
 class FetchHyperliquidOhlcvTests(unittest.TestCase):
     def test_resolves_only_active_swap_symbols(self) -> None:
@@ -65,6 +80,22 @@ class FetchHyperliquidOhlcvTests(unittest.TestCase):
         self.assertEqual([row[0] for row in candles], [0, 60_000, 120_000])
         self.assertEqual(exchange.calls, [("BTC/USDC:USDC", 0), ("BTC/USDC:USDC", 120_000)])
 
+    def test_fetch_symbol_funding_rates_qualifies_unsupported_history(self) -> None:
+        funding_rates, error, method = fetch_symbol_funding_rates(
+            NoFundingExchange(), "BTC/USDC:USDC", 0, 120_000, 2, 0, 0
+        )
+        self.assertEqual(funding_rates, [])
+        self.assertEqual(method, "fetch_funding_rate_history")
+        self.assertIn("not available", error)
+
+    def test_fetch_symbol_funding_rates_paginates_history(self) -> None:
+        funding_rates, error, method = fetch_symbol_funding_rates(
+            FakeExchange(), "BTC/USDC:USDC", 0, 120_000, 2, 0, 0
+        )
+        self.assertIsNone(error)
+        self.assertEqual(method, "fetch_funding_rate_history")
+        self.assertEqual(funding_rates, [(0, 0.0001), (60_000, -0.0002), (120_000, 0.0003)])
+
     def test_run_download_writes_outputs_and_continues_after_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             args = Namespace(
@@ -77,6 +108,7 @@ class FetchHyperliquidOhlcvTests(unittest.TestCase):
                 symbols="BTC/USDC:USDC,ETH/USDC:USDC",
                 symbol_limit=None,
                 limit=2,
+                funding_limit=2,
                 max_retries=0,
                 retry_sleep=0,
             )
@@ -105,16 +137,28 @@ class FetchHyperliquidOhlcvTests(unittest.TestCase):
                 self.assertTrue({"symbols", "candles", "funding_rates", "fetch_metadata"}.issubset(tables))
                 candle_count = conn.execute("SELECT COUNT(*) FROM candles").fetchone()[0]
                 self.assertEqual(candle_count, 3)
+                funding_count = conn.execute("SELECT COUNT(*) FROM funding_rates").fetchone()[0]
+                self.assertEqual(funding_count, 3)
                 statuses = conn.execute(
-                    "SELECT symbol, status FROM fetch_metadata ORDER BY symbol"
+                    "SELECT symbol, data_kind, status FROM fetch_metadata ORDER BY symbol, data_kind"
                 ).fetchall()
-                self.assertEqual(statuses, [("BTC/USDC:USDC", "success"), ("ETH/USDC:USDC", "failed")])
+                self.assertEqual(
+                    statuses,
+                    [
+                        ("BTC/USDC:USDC", "funding", "success"),
+                        ("BTC/USDC:USDC", "ohlcv", "success"),
+                        ("ETH/USDC:USDC", "funding", "unsupported"),
+                        ("ETH/USDC:USDC", "ohlcv", "failed"),
+                    ],
+                )
 
             with (Path(tmp) / "coverage_report.json").open(encoding="utf-8") as handle:
                 coverage = json.load(handle)
             self.assertEqual(coverage["expected_count_per_symbol"], 3)
             self.assertEqual(coverage["incomplete_symbols"], ["ETH/USDC:USDC"])
             self.assertEqual(coverage["symbols"][0]["missing_count"], 0)
+            self.assertEqual(coverage["symbols"][0]["funding_count"], 3)
+            self.assertEqual(coverage["symbols"][1]["funding_status"], "unsupported")
             self.assertEqual(coverage["symbols"][1]["missing_count"], 3)
             self.assertTrue((Path(tmp) / "coverage_report.md").exists())
 
@@ -130,6 +174,7 @@ class FetchHyperliquidOhlcvTests(unittest.TestCase):
                 symbols="BTC/USDC:USDC",
                 symbol_limit=None,
                 limit=2,
+                funding_limit=2,
                 max_retries=0,
                 retry_sleep=0,
             )
