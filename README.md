@@ -44,3 +44,29 @@ python scripts/fetch_hyperliquid_ohlcv.py --funding-limit 1000
 ```
 
 Failures are recorded per symbol in `manifest.json`; one symbol failure does not abort the rest of the run.
+
+## AZTE And CBD Metrics
+
+After downloading candles, compute the paper's market-data-dependent trigger and diversification metrics from the SQLite store:
+
+```bash
+python scripts/compute_azte_cbd_metrics.py --db data/hyperliquid_ohlcv/market_data.sqlite
+```
+
+The command reads stored OHLCV closes, uses the paper defaults of a 30-bar rolling absolute-return baseline, `z >= 2.0`, and `abs_return >= 0.003`, and writes deterministic outputs under `data/hyperliquid_ohlcv/azte_cbd_metrics/`:
+
+| File | Purpose |
+| --- | --- |
+| `azte_cbd_metrics.csv` | Per-symbol, per-bar metric rows after the first candle, including warmup status, rolling mean/std, z-score, trigger flag, BTC availability, `correlation_to_btc`, `rho_cb`, `z_tilde`, and `omega`. |
+| `azte_cbd_events.csv` | Event-level subset containing only triggered AZTE rows for downstream validation. |
+| `azte_cbd_summary.json` | Per-symbol row counts, warmup rows, trigger counts, CBD computed rows, and missing-BTC counts. |
+
+Useful options:
+
+```bash
+python scripts/compute_azte_cbd_metrics.py --symbols BTC/USDC:USDC,ETH/USDC:USDC --btc-symbol BTC/USDC:USDC
+python scripts/compute_azte_cbd_metrics.py --window 30 --z-threshold 2.0 --absolute-return-floor 0.003
+python scripts/compute_azte_cbd_metrics.py --per-symbol
+```
+
+Warmup rows are retained and marked explicitly. CBD fields are populated only when a BTC candle exists at the same timestamp and enough aligned BTC/asset observations are available; otherwise `cbd_status` records the limitation.
