@@ -1,0 +1,32 @@
+experiment:
+  name: agenticaita_functional_replication
+  mode: dry_run
+  seed: 42
+  output_dir: results
+azte:
+  polling_interval_seconds: 60
+  rolling_window: 30
+  z_threshold: 2.0
+  absolute_return_floor: 0.003
+igp:
+  global_cooldown_seconds: 1800
+  per_asset_cooldown_seconds: 300
+risk:
+  confidence_gate: 0.60
+  max_stop_loss_fraction: 0.02
+  max_position_size_usd: 500.0
+  base_position_size_usd: 188.0
+cbd:
+  alpha: 0.5
+  kappa: 0.5
+  benchmark_asset: BTC
+cost_scenarios:
+  zero_cost: 0.0
+  conservative_maker_only: 0.0004
+  realistic_taker_plus_spread: 0.0010
+  adverse_illiquid_long_tail: 0.0020
+synthetic_data:
+  assets: [BTC, ETH, SOL, AVAX, XPL, CC, FARTCOIN, BCH]
+  minutes: 1440
+  macro_shock_minute: 720
+  macro_shock_size: -0.08

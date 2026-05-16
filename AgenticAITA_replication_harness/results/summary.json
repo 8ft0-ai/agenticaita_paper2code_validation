@@ -1,0 +1,50 @@
+{
+  "data_source": "deterministic_synthetic",
+  "replication_level": "functional architecture replication, not empirical replication",
+  "summary": {
+    "total_invocations": 44,
+    "analyst_long": 21,
+    "analyst_short": 23,
+    "analyst_wait": 0,
+    "risk_approved": 43,
+    "risk_rejected": 1,
+    "trades_executed": 43,
+    "wins": 21,
+    "losses": 22,
+    "net_pnl_usd": -3.2254029540730307,
+    "gross_profit_usd": 20.32288353584378,
+    "gross_loss_usd_abs": 23.548286489916812,
+    "win_rate_pct": 48.83720930232558,
+    "profit_factor": 0.8630302482750019,
+    "agentic_friction_pct": 2.272727272727273,
+    "exact_binomial_p_one_sided": 0.619604178719328,
+    "normal_approx_p_one_sided": 0.5606031410203511
+  },
+  "transaction_cost_sensitivity": [
+    {
+      "scenario": "zero_cost",
+      "round_trip_rate": 0.0,
+      "total_cost_usd": 0.0,
+      "adjusted_net_pnl_usd": -3.2254029540730307
+    },
+    {
+      "scenario": "conservative_maker_only",
+      "round_trip_rate": 0.0004,
+      "total_cost_usd": 3.2336,
+      "adjusted_net_pnl_usd": -6.45900295407303
+    },
+    {
+      "scenario": "realistic_taker_plus_spread",
+      "round_trip_rate": 0.001,
+      "total_cost_usd": 8.084,
+      "adjusted_net_pnl_usd": -11.30940295407303
+    },
+    {
+      "scenario": "adverse_illiquid_long_tail",
+      "round_trip_rate": 0.002,
+      "total_cost_usd": 16.168,
+      "adjusted_net_pnl_usd": -19.39340295407303
+    }
+  ],
+  "caveat": "Synthetic data and deterministic proxy agents do not validate the paper's live-market claims."
+}
