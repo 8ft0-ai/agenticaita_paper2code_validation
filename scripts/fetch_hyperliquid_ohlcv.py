@@ -127,6 +127,77 @@ def fetch_symbol_candles(
     return candles, None
 
 
+def normalise_funding_rate(row: dict[str, Any]) -> tuple[int, float] | None:
+    timestamp = row.get("timestamp")
+    rate = row.get("fundingRate")
+    if rate is None:
+        rate = row.get("funding_rate")
+    if timestamp is None or rate is None:
+        return None
+    return int(timestamp), float(rate)
+
+
+def fetch_symbol_funding_rates(
+    exchange: Any,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    limit: int,
+    max_retries: int,
+    retry_sleep: float,
+) -> tuple[list[tuple[int, float]], str | None, str]:
+    method_name = "fetch_funding_rate_history"
+    method = getattr(exchange, method_name, None)
+    if method is None:
+        return [], f"{method_name} is not available on exchange", method_name
+
+    since = start_ms
+    funding_rates: list[tuple[int, float]] = []
+    seen: set[int] = set()
+    while since <= end_ms:
+        batch = None
+        last_error: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                batch = method(symbol, since=since, limit=limit)
+                break
+            except Exception as exc:  # pragma: no cover - exact ccxt exceptions vary by version.
+                last_error = exc
+                if attempt == max_retries:
+                    return funding_rates, f"{method_name} failed at {iso_utc(since)}: {exc}", method_name
+                time.sleep(retry_sleep * (attempt + 1))
+
+        if batch is None:
+            return funding_rates, f"{method_name} failed at {iso_utc(since)}: {last_error}", method_name
+        if not batch:
+            break
+
+        advanced_to = since
+        for item in batch:
+            parsed = normalise_funding_rate(item)
+            if parsed is None:
+                continue
+            ts, funding_rate = parsed
+            advanced_to = max(advanced_to, ts)
+            if start_ms <= ts <= end_ms and ts not in seen:
+                seen.add(ts)
+                funding_rates.append((ts, funding_rate))
+
+        next_since = advanced_to + 1
+        if next_since <= since:
+            return funding_rates, f"{method_name} pagination stalled at {iso_utc(since)}", method_name
+        since = next_since
+
+        rate_limit_ms = getattr(exchange, "rateLimit", None)
+        if rate_limit_ms:
+            time.sleep(float(rate_limit_ms) / 1000.0)
+
+    funding_rates.sort(key=lambda item: item[0])
+    if not funding_rates:
+        return funding_rates, f"{method_name} returned no funding history for requested window", method_name
+    return funding_rates, None, method_name
+
+
 def write_candles_csv(path: Path, symbol: str, candles: list[list[Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -183,6 +254,8 @@ def init_storage(db_path: Path) -> sqlite3.Connection:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             exchange_id TEXT NOT NULL,
             symbol TEXT NOT NULL,
+            data_kind TEXT NOT NULL DEFAULT 'ohlcv',
+            method TEXT,
             timeframe TEXT NOT NULL,
             start_ms INTEGER NOT NULL,
             end_ms INTEGER NOT NULL,
@@ -195,6 +268,11 @@ def init_storage(db_path: Path) -> sqlite3.Connection:
         );
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(fetch_metadata)")}
+    if "data_kind" not in columns:
+        conn.execute("ALTER TABLE fetch_metadata ADD COLUMN data_kind TEXT NOT NULL DEFAULT 'ohlcv'")
+    if "method" not in columns:
+        conn.execute("ALTER TABLE fetch_metadata ADD COLUMN method TEXT")
     return conn
 
 
@@ -263,10 +341,38 @@ def store_candles(
     )
 
 
+def store_funding_rates(
+    conn: sqlite3.Connection,
+    exchange_id: str,
+    symbol: str,
+    funding_rates: list[tuple[int, float]],
+) -> None:
+    retrieved_at = iso_utc(int(time.time() * 1000))
+    rows = [
+        (exchange_id, symbol, ts, iso_utc(ts), funding_rate, retrieved_at)
+        for ts, funding_rate in funding_rates
+    ]
+    conn.executemany(
+        """
+        INSERT INTO funding_rates (
+            exchange_id, symbol, timestamp_ms, timestamp, funding_rate, retrieved_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(exchange_id, symbol, timestamp_ms) DO UPDATE SET
+            timestamp = excluded.timestamp,
+            funding_rate = excluded.funding_rate,
+            retrieved_at = excluded.retrieved_at
+        """,
+        rows,
+    )
+
+
 def store_fetch_metadata(
     conn: sqlite3.Connection,
     exchange_id: str,
     symbol: str,
+    data_kind: str,
+    method: str | None,
     timeframe: str,
     start_ms: int,
     end_ms: int,
@@ -278,14 +384,16 @@ def store_fetch_metadata(
     conn.execute(
         """
         INSERT INTO fetch_metadata (
-            exchange_id, symbol, timeframe, start_ms, end_ms,
+            exchange_id, symbol, data_kind, method, timeframe, start_ms, end_ms,
             status, candle_count, error, csv_path, retrieved_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             exchange_id,
             symbol,
+            data_kind,
+            method,
             timeframe,
             start_ms,
             end_ms,
@@ -321,10 +429,22 @@ def build_coverage_report(
             """
             SELECT symbol, status
             FROM fetch_metadata
-            WHERE exchange_id = ? AND timeframe = ? AND start_ms = ? AND end_ms = ?
+            WHERE exchange_id = ? AND timeframe = ? AND start_ms = ? AND end_ms = ? AND data_kind = 'ohlcv'
             ORDER BY id
             """,
             (exchange_id, timeframe, start_ms, end_ms),
+        )
+    }
+    latest_funding = {
+        row[0]: {"status": row[1], "method": row[2], "error": row[3]}
+        for row in conn.execute(
+            """
+            SELECT symbol, status, method, error
+            FROM fetch_metadata
+            WHERE exchange_id = ? AND start_ms = ? AND end_ms = ? AND data_kind = 'funding'
+            ORDER BY id
+            """,
+            (exchange_id, start_ms, end_ms),
         )
     }
 
@@ -343,6 +463,15 @@ def build_coverage_report(
         duplicate_count = sum(int(count) - 1 for _timestamp_ms, count in rows if int(count) > 1)
         missing = sorted(expected_set - present)
         status = latest_status.get(symbol, "not_requested")
+        funding_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM funding_rates
+            WHERE exchange_id = ? AND symbol = ? AND timestamp_ms BETWEEN ? AND ?
+            """,
+            (exchange_id, symbol, start_ms, end_ms),
+        ).fetchone()[0]
+        funding = latest_funding.get(symbol, {"status": "not_requested", "method": None, "error": None})
         if status != "success" or not rows:
             unavailable_symbols.append(symbol)
         symbol_reports.append(
@@ -355,10 +484,15 @@ def build_coverage_report(
                 "missing_intervals": [iso_utc(ts) for ts in missing[:50]],
                 "duplicate_timestamps": duplicate_count,
                 "complete": status == "success" and len(missing) == 0 and duplicate_count == 0,
+                "funding_status": funding["status"],
+                "funding_method": funding["method"],
+                "funding_count": funding_count,
+                "funding_error": funding["error"],
             }
         )
 
     incomplete_symbols = [item["symbol"] for item in symbol_reports if not item["complete"]]
+    funding_available_symbols = [item["symbol"] for item in symbol_reports if item["funding_count"] > 0]
     return {
         "exchange": exchange_id,
         "timeframe": timeframe,
@@ -368,6 +502,11 @@ def build_coverage_report(
         "symbols": symbol_reports,
         "incomplete_symbols": incomplete_symbols,
         "unavailable_symbols": unavailable_symbols,
+        "funding_available_symbols": funding_available_symbols,
+        "benchmark_modes": {
+            "price_only": "available when OHLCV candles are complete",
+            "funding_adjusted": "available only for symbols with stored funding_rates rows; otherwise report as unsupported/incomplete",
+        },
     }
 
 
@@ -384,15 +523,22 @@ def write_coverage_reports(report: dict[str, Any], json_path: Path, markdown_pat
         f"Timeframe: `{report['timeframe']}`",
         f"Window: `{report['start']}` to `{report['end']}`",
         f"Expected candles per symbol: `{report['expected_count_per_symbol']}`",
+        "Benchmark modes: price-only benchmarks use OHLCV candles; funding-adjusted benchmarks require stored funding-rate rows and are qualified per symbol below.",
         "",
-        "| Symbol | Status | Candles | Expected | Missing | Duplicates | Complete |",
-        "| --- | --- | ---: | ---: | ---: | ---: | --- |",
+        "| Symbol | Status | Candles | Expected | Missing | Duplicates | Complete | Funding status | Funding rows |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- | --- | ---: |",
     ]
     for item in report["symbols"]:
         lines.append(
             "| {symbol} | {status} | {candle_count} | {expected_count} | {missing_count} | "
-            "{duplicate_timestamps} | {complete} |".format(**item)
+            "{duplicate_timestamps} | {complete} | {funding_status} | {funding_count} |".format(**item)
         )
+    lines.extend(["", "## Funding Availability", ""])
+    for item in report["symbols"]:
+        if item["funding_error"]:
+            lines.append(f"- `{item['symbol']}`: `{item['funding_status']}` via `{item['funding_method']}` - {item['funding_error']}")
+        else:
+            lines.append(f"- `{item['symbol']}`: `{item['funding_status']}` with `{item['funding_count']}` rows")
     lines.extend(["", "## Incomplete Symbols", ""])
     lines.extend(f"- `{symbol}`" for symbol in report["incomplete_symbols"])
     if not report["incomplete_symbols"]:
@@ -450,15 +596,44 @@ def run_download(exchange: Any, args: argparse.Namespace) -> dict[str, Any]:
         record = {"symbol": symbol, "candles": len(candles), "path": str(csv_path)}
         if error:
             store_fetch_metadata(
-                conn, args.exchange, symbol, args.timeframe, start_ms, end_ms, "failed", len(candles), error, csv_path
+                conn, args.exchange, symbol, "ohlcv", "fetch_ohlcv", args.timeframe, start_ms, end_ms, "failed", len(candles), error, csv_path
             )
             record["error"] = error
             manifest["failures"].append(record)
         else:
             store_fetch_metadata(
-                conn, args.exchange, symbol, args.timeframe, start_ms, end_ms, "success", len(candles), None, csv_path
+                conn, args.exchange, symbol, "ohlcv", "fetch_ohlcv", args.timeframe, start_ms, end_ms, "success", len(candles), None, csv_path
             )
             manifest["successes"].append(record)
+
+        funding_rates, funding_error, funding_method = fetch_symbol_funding_rates(
+            exchange,
+            symbol,
+            start_ms,
+            end_ms,
+            args.funding_limit,
+            args.max_retries,
+            args.retry_sleep,
+        )
+        store_funding_rates(conn, args.exchange, symbol, funding_rates)
+        funding_status = "success" if funding_error is None else "unsupported"
+        store_fetch_metadata(
+            conn,
+            args.exchange,
+            symbol,
+            "funding",
+            funding_method,
+            "funding",
+            start_ms,
+            end_ms,
+            funding_status,
+            len(funding_rates),
+            funding_error,
+            csv_path,
+        )
+        record["funding_rates"] = len(funding_rates)
+        if funding_error:
+            record["funding_error"] = funding_error
         conn.commit()
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -487,6 +662,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--symbols", default=None, help="comma-separated active swap symbols for a smoke subset")
     parser.add_argument("--symbol-limit", type=int, default=None, help="first N active swap symbols for smoke testing")
     parser.add_argument("--limit", type=int, default=1000, help="per-request candle limit")
+    parser.add_argument("--funding-limit", type=int, default=1000, help="per-request funding history limit")
     parser.add_argument("--max-retries", type=int, default=3, help="retries per paginated request")
     parser.add_argument("--retry-sleep", type=float, default=2.0, help="base seconds between retries")
     return parser
