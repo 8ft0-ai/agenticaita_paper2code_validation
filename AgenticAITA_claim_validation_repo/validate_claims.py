@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from metrics import result_to_dict, run_all_validations
+from real_data_validation import run_real_data_validation, serialise_real_row, write_real_data_markdown
 
 
 def serialise(value: Any) -> str:
@@ -30,6 +31,14 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({key: serialise(row.get(key, "")) for key in writer.fieldnames})
+
+
+def write_real_data_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["section", "check_id", "status", "summary", "details"])
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(serialise_real_row(row))
 
 
 def write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -72,9 +81,32 @@ def write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=Path("results"))
+    parser.add_argument("--market-db", type=Path, default=None, help="run real-data validation against a downloaded SQLite store")
+    parser.add_argument("--exchange", default="hyperliquid", help="exchange_id stored in the market-data database")
+    parser.add_argument("--timeframe", default="1m", help="timeframe stored in the market-data database")
+    parser.add_argument("--symbols", default=None, help="comma-separated symbols to validate; defaults to all stored symbols")
+    parser.add_argument("--btc-symbol", default=None, help="BTC symbol to use for CBD; defaults to the first stored BTC market")
+    parser.add_argument("--window", type=int, default=30, help="rolling AZTE/CBD window size")
+    parser.add_argument("--z-threshold", type=float, default=2.0, help="AZTE z-score threshold")
+    parser.add_argument("--absolute-return-floor", type=float, default=0.003, help="AZTE absolute-return floor")
+    parser.add_argument("--cbd-alpha", type=float, default=0.5, help="CBD blend weight for z_tilde")
+    parser.add_argument("--cbd-kappa", type=float, default=0.5, help="CBD saturation parameter")
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.market_db is not None:
+        rows = run_real_data_validation(args)
+        write_json(args.out / "real_data_validation_results.json", rows)
+        write_real_data_csv(args.out / "real_data_validation_results.csv", rows)
+        write_real_data_markdown(args.out / "real_data_validation_report.md", rows)
+
+        counts = Counter(row["status"] for row in rows)
+        print("Real-data validation complete")
+        for status in ["pass", "fail", "unsupported", "exploratory"]:
+            print(f"{status}: {counts.get(status, 0)}")
+        print(f"Report: {args.out / 'real_data_validation_report.md'}")
+        return
+
     rows = [result_to_dict(result) for result in run_all_validations()]
     write_json(args.out / "validation_results.json", rows)
     write_csv(args.out / "validation_results.csv", rows)
