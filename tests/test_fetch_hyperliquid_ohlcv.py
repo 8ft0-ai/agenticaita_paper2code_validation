@@ -160,7 +160,10 @@ class FetchHyperliquidOhlcvTests(unittest.TestCase):
             self.assertEqual(coverage["symbols"][0]["funding_count"], 3)
             self.assertEqual(coverage["symbols"][1]["funding_status"], "unsupported")
             self.assertEqual(coverage["symbols"][1]["missing_count"], 3)
-            self.assertTrue((Path(tmp) / "coverage_report.md").exists())
+            self.assertTrue(any("original agent decisions" in item for item in coverage["reconstruction_limitations"]))
+            coverage_markdown = (Path(tmp) / "coverage_report.md").read_text(encoding="utf-8")
+            self.assertIn("## Reconstruction Limitations", coverage_markdown)
+            self.assertIn("Original L2 order book snapshots", coverage_markdown)
 
     def test_build_coverage_report_identifies_gaps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

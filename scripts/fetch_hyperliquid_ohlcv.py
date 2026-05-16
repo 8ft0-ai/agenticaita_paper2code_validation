@@ -507,6 +507,12 @@ def build_coverage_report(
             "price_only": "available when OHLCV candles are complete",
             "funding_adjusted": "available only for symbols with stored funding_rates rows; otherwise report as unsupported/incomplete",
         },
+        "reconstruction_limitations": [
+            "Public OHLCV/funding APIs reconstruct market conditions, not the paper's original agent decisions.",
+            "Original L2 order book snapshots are not recoverable from candle downloads.",
+            "Original prompts, LLM calls, negotiations, and risk-manager approvals are not recoverable without logs.",
+            "The paper's original SQLite dry-run database and trade provenance remain unsupported unless supplied as artefacts.",
+        ],
     }
 
 
@@ -524,6 +530,7 @@ def write_coverage_reports(report: dict[str, Any], json_path: Path, markdown_pat
         f"Window: `{report['start']}` to `{report['end']}`",
         f"Expected candles per symbol: `{report['expected_count_per_symbol']}`",
         "Benchmark modes: price-only benchmarks use OHLCV candles; funding-adjusted benchmarks require stored funding-rate rows and are qualified per symbol below.",
+        "Reconstruction scope: public APIs can reproduce market-condition inputs, not the original agent decisions or dry-run records.",
         "",
         "| Symbol | Status | Candles | Expected | Missing | Duplicates | Complete | Funding status | Funding rows |",
         "| --- | --- | ---: | ---: | ---: | ---: | --- | --- | ---: |",
@@ -550,6 +557,9 @@ def write_coverage_reports(report: dict[str, Any], json_path: Path, markdown_pat
             lines.append(f"- `{item['symbol']}`: {sample}")
     if not any(item["missing_intervals"] for item in report["symbols"]):
         lines.append("- None")
+    lines.extend(["", "## Reconstruction Limitations", ""])
+    for limitation in report["reconstruction_limitations"]:
+        lines.append(f"- {limitation}")
     markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
