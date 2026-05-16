@@ -1,0 +1,44 @@
+claim_id,claim,paper_value,computed_value,status,tolerance,notes
+pipeline.long_rate_pct,Pipeline percentage long_rate_pct matches the paper.,90.4,90.44586,pass,±0.06 percentage points,
+pipeline.short_rate_pct,Pipeline percentage short_rate_pct matches the paper.,1.3,1.273885,pass,±0.06 percentage points,
+pipeline.wait_rate_pct,Pipeline percentage wait_rate_pct matches the paper.,8.3,8.280255,pass,±0.06 percentage points,
+pipeline.approved_rate_pct,Pipeline percentage approved_rate_pct matches the paper.,96.5,96.527778,pass,±0.06 percentage points,
+pipeline.rejected_rate_pct_rm_denominator,Pipeline percentage rejected_rate_pct_rm_denominator matches the paper.,3.5,3.472222,pass,±0.06 percentage points,
+pipeline.rejected_rate_pct_all_invocations,Pipeline percentage rejected_rate_pct_all_invocations matches the paper.,3.2,3.184713,pass,±0.06 percentage points,
+pipeline.trades_executed_pct,Pipeline percentage trades_executed_pct matches the paper.,88.5,88.535032,pass,±0.06 percentage points,
+pipeline.asset_breadth_pct,Pipeline percentage asset_breadth_pct matches the paper.,54.68,54.676259,pass,±0.06 percentage points,
+pipeline.agentic_friction,Agentic friction F=(N_rej+N_wait)/N is 18/157 ≈ 11.5%.,11.5%,11.464968,pass,±0.06 percentage points,
+pipeline.signal_count_conservation,Analyst long + short + wait equals total invocations.,157,157,pass,exact integer equality,
+pipeline.risk_manager_count_conservation,Risk Manager approved + rejected equals invocations reaching Risk Manager.,144,144,pass,exact integer equality,
+trading.win_rate_pct,Win rate is 72/139 = 51.80%.,51.8,51.798561,pass,±0.03 percentage points,
+trading.net_pnl,Net PnL is gross profit minus gross loss.,-15.07,-15.07,pass,±$0.01,
+trading.return_pct,"Return on $26,079 notional is about -0.058%.",-0.058,-0.057786,pass,±0.002 percentage points,
+trading.profit_factor,Profit factor is gross profit / gross loss.,0.841,0.840933,pass,±0.001,
+trading.mean_win,Mean win is $79.67 / 72.,1.11,1.106528,pass,±$0.01,
+trading.mean_loss,Mean loss is $94.74 / 67.,1.41,1.41403,pass,±$0.01,
+trading.risk_reward,Risk/reward is mean take-profit percentage divided by mean stop-loss percentage.,3.02,3.020734,pass,±0.005,
+trading.break_even_win_rate,Break-even win rate at RR=3.02 is 1/(1+RR).,24.9,24.875622,pass,±0.05 percentage points,
+trading.btc_loss_from_notional,"A -15% BTC benchmark loss on $26,079 is about -$3,912.",-3912.0,-3911.85,pass,±$0.25,
+trading.alpha_usd,Benchmark alpha in dollars is AGENTICAITA PnL minus BTC buy-and-hold PnL.,3896.0,3896.93,pass,±$1.00 due table rounding,
+trading.alpha_percentage_points,Benchmark alpha is agent return minus BTC return.,14.94,14.942214,pass,±0.01 percentage points,
+stats.binomial_pvalue_normal_approx,Paper's p≈0.34 is reproducible as a one-sided normal approximation for 72/139 against 50%.,≈0.34,0.335748,pass,approximation; exact one-sided p is separately reported,z=0.424094; exact one-sided p=0.367270; exact two-sided p=0.734539
+stats.binomial_pvalue_exact_one_sided,Exact one-sided binomial p-value for 72 wins out of 139 is close but not exactly 0.34.,≈0.34,0.36727,qualified,method caveat,The paper's value appears to use a normal approximation rather than an exact binomial test.
+stats.binomial_significance,The observed win rate is not statistically significant versus 50%. ,not significant,"{""exact_one_sided"": 0.36727, ""exact_two_sided"": 0.734539}",pass,p-values well above 0.05,
+cost.zero_cost,Transaction-cost sensitivity for Zero cost matches total_notional * round_trip_rate.,"{""adjusted_net_pnl_usd"": -15.07, ""total_cost_usd"": 0.0}","{""adjusted_net_pnl_usd"": -15.07, ""total_cost_usd"": 0.0}",pass,±$0.03,Small differences are consistent with cents rounding and the paper's rounded mean position size.
+cost.conservative_maker_only,Transaction-cost sensitivity for Conservative maker only matches total_notional * round_trip_rate.,"{""adjusted_net_pnl_usd"": -25.5, ""total_cost_usd"": 10.43}","{""adjusted_net_pnl_usd"": -25.5016, ""total_cost_usd"": 10.4316}",pass,±$0.03,Small differences are consistent with cents rounding and the paper's rounded mean position size.
+cost.realistic_taker_plus_spread,Transaction-cost sensitivity for Realistic taker plus spread matches total_notional * round_trip_rate.,"{""adjusted_net_pnl_usd"": -41.16, ""total_cost_usd"": 26.09}","{""adjusted_net_pnl_usd"": -41.149, ""total_cost_usd"": 26.079}",pass,±$0.03,Small differences are consistent with cents rounding and the paper's rounded mean position size.
+cost.adverse_illiquid_long_tail,Transaction-cost sensitivity for Adverse illiquid long tail matches total_notional * round_trip_rate.,"{""adjusted_net_pnl_usd"": -67.25, ""total_cost_usd"": 52.18}","{""adjusted_net_pnl_usd"": -67.228, ""total_cost_usd"": 52.158}",pass,±$0.03,Small differences are consistent with cents rounding and the paper's rounded mean position size.
+azte.false_positive_rate,The paper states that a 2.0σ threshold gives an expected false-positive rate of approximately 4.6% under normality.,≈4.6%,"{""P(Z >= 2) one-sided"": 2.275013, ""P(|Z| >= 2) two-sided"": 4.550026}",qualified,interpretation caveat,"4.6% is the two-sided normal tail. The paper's trigger is written as z_t >= 2.0, which is one-sided and has tail probability about 2.28%. Because r_t is an absolute return, the normality assumption also does not directly apply to z_t without further distributional justification."
+azte.hot_restart_warmup,W=30 observations at 60 seconds implies a 30-minute warmup window.,30 minutes,30 minutes,pass,exact arithmetic,
+cbd.z_tilde_bounded,"The saturated anomaly mapping z_tilde is in [0,1) for triggered observations.","z_tilde in [0,1)","{""0.0"": 0.0, ""1.0"": 0.0, ""10.0"": 0.981684, ""2.0"": 0.0, ""2.1"": 0.048771, ""3.0"": 0.393469, ""5.0"": 0.77687}",pass,property test over representative values and analytical form,
+cbd.diversification_incentive,"For identical anomaly magnitude, higher decorrelation gives higher composite CBD score.",strictly higher score for higher rho_cb,"{""rho_cb=0.1"": 0.246735, ""rho_cb=0.9"": 0.646735}",pass,strict inequality,
+asset_classes.trade_count_sum,Asset-class trade counts sum to 139.,139,139,pass,exact integer equality,
+asset_classes.net_pnl_sum,Asset-class net PnL rows sum to total net PnL within rounding.,-15.07,-15.08,pass,±$0.02 due row rounding,"The rounded rows sum to -$15.08, a one-cent discrepancy from the table total."
+asset_classes.weighted_win_rate,Weighted asset-class win rate agrees with the 51.80% total within rounding.,51.8,51.8,pass,±0.20 percentage points due rounded class win rates,
+asset_classes.weighted_confidence,Weighted average confidence is close to the table's 0.755 total.,0.755,0.754223,pass,±0.002 due rounded class confidence values,
+raw.zero_human_intervention,157 autonomous invocations with zero human interventions.,claimed,not computable from paper alone,unsupported,n/a,Requires system logs or an experiment audit trail.
+raw.sqlite_no_post_processing,Figures and metrics were extracted directly from the trades SQLite table with no post-processing.,claimed,not computable from paper alone,unsupported,n/a,Requires the SQLite database and plotting scripts.
+raw.funding_corrected_benchmark,Funding-corrected BTC perpetual benchmark is strictly worse than price-only BTC benchmark.,claimed,not computable from paper alone,unsupported,n/a,Requires timestamped funding-rate cash flows and position sizing.
+raw.cbd_empirical_asset_correlation,Top performers all had rho_cb > 0.85 and low-rho_cb assets produced deepest losses.,claimed,not computable from paper alone,unsupported,n/a,"Requires per-asset price series, CBD scores, and trade-level PnL records."
+raw.live_market_conditions,The five-day dry run used live market conditions and qwen3.5:9b via remote Ollama.,claimed,not computable from paper alone,unsupported,n/a,"Requires telemetry, API logs, and environment configuration."
+raw.no_parameter_tuning,No parameters were tuned during the session.,claimed,not computable from paper alone,unsupported,n/a,Requires configuration history and deployment logs.

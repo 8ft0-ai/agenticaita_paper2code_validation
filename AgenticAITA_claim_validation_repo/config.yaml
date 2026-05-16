@@ -1,0 +1,24 @@
+validation:
+  money_tolerance_usd: 0.03
+  percent_tolerance_points: 0.06
+  ratio_tolerance: 0.005
+  pvalue_tolerance: 0.04
+paper_values:
+  total_invocations: 157
+  analyst_long: 142
+  analyst_short: 2
+  analyst_wait: 13
+  risk_manager_approved: 139
+  risk_manager_rejected: 5
+  trades_executed: 139
+  unique_assets: 76
+  wins: 72
+  losses: 67
+  gross_profit_usd: 79.67
+  gross_loss_usd_abs: 94.74
+  net_pnl_usd: -15.07
+  total_notional_usd: 26079
+  btc_buy_hold_pnl_usd: -3912
+  reported_alpha_usd: 3896
+  mean_stop_loss_pct: 0.627
+  mean_take_profit_pct: 1.894
