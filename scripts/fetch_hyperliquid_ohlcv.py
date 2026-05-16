@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import re
+import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from typing import Any, Iterable
 DEFAULT_START = "2026-04-06T00:00:00Z"
 DEFAULT_END = "2026-04-11T23:59:59Z"
 DEFAULT_OUT = "data/hyperliquid_ohlcv"
+DEFAULT_DB_NAME = "market_data.sqlite"
 
 
 def parse_utc_ms(value: str) -> int:
@@ -134,8 +136,280 @@ def write_candles_csv(path: Path, symbol: str, candles: list[list[Any]]) -> None
             writer.writerow([int(ts), iso_utc(int(ts)), symbol, open_, high, low, close, volume])
 
 
+def init_storage(db_path: Path) -> sqlite3.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS symbols (
+            exchange_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            market_type TEXT,
+            active INTEGER,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            PRIMARY KEY (exchange_id, symbol)
+        );
+
+        CREATE TABLE IF NOT EXISTS candles (
+            exchange_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            timestamp_ms INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume REAL NOT NULL,
+            retrieved_at TEXT NOT NULL,
+            PRIMARY KEY (exchange_id, symbol, timeframe, timestamp_ms),
+            FOREIGN KEY (exchange_id, symbol) REFERENCES symbols(exchange_id, symbol)
+        );
+
+        CREATE TABLE IF NOT EXISTS funding_rates (
+            exchange_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            timestamp_ms INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
+            funding_rate REAL,
+            retrieved_at TEXT NOT NULL,
+            PRIMARY KEY (exchange_id, symbol, timestamp_ms),
+            FOREIGN KEY (exchange_id, symbol) REFERENCES symbols(exchange_id, symbol)
+        );
+
+        CREATE TABLE IF NOT EXISTS fetch_metadata (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exchange_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            start_ms INTEGER NOT NULL,
+            end_ms INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            candle_count INTEGER NOT NULL,
+            error TEXT,
+            csv_path TEXT,
+            retrieved_at TEXT NOT NULL,
+            FOREIGN KEY (exchange_id, symbol) REFERENCES symbols(exchange_id, symbol)
+        );
+        """
+    )
+    return conn
+
+
+def store_symbol_catalog(conn: sqlite3.Connection, exchange_id: str, markets: dict[str, dict[str, Any]]) -> None:
+    now = iso_utc(int(time.time() * 1000))
+    for market_key, market in markets.items():
+        symbol = str(market.get("symbol") or market_key)
+        market_type = market.get("type")
+        if market_type is None:
+            market_type = "swap" if market.get("swap") is True else "spot" if market.get("spot") is True else None
+        active = market.get("active")
+        conn.execute(
+            """
+            INSERT INTO symbols (exchange_id, symbol, market_type, active, first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(exchange_id, symbol) DO UPDATE SET
+                market_type = excluded.market_type,
+                active = excluded.active,
+                last_seen_at = excluded.last_seen_at
+            """,
+            (exchange_id, symbol, market_type, None if active is None else int(bool(active)), now, now),
+        )
+
+
+def store_candles(
+    conn: sqlite3.Connection,
+    exchange_id: str,
+    symbol: str,
+    timeframe: str,
+    candles: list[list[Any]],
+) -> None:
+    retrieved_at = iso_utc(int(time.time() * 1000))
+    rows = [
+        (
+            exchange_id,
+            symbol,
+            timeframe,
+            int(ts),
+            iso_utc(int(ts)),
+            float(open_),
+            float(high),
+            float(low),
+            float(close),
+            float(volume),
+            retrieved_at,
+        )
+        for ts, open_, high, low, close, volume in candles
+    ]
+    conn.executemany(
+        """
+        INSERT INTO candles (
+            exchange_id, symbol, timeframe, timestamp_ms, timestamp,
+            open, high, low, close, volume, retrieved_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(exchange_id, symbol, timeframe, timestamp_ms) DO UPDATE SET
+            timestamp = excluded.timestamp,
+            open = excluded.open,
+            high = excluded.high,
+            low = excluded.low,
+            close = excluded.close,
+            volume = excluded.volume,
+            retrieved_at = excluded.retrieved_at
+        """,
+        rows,
+    )
+
+
+def store_fetch_metadata(
+    conn: sqlite3.Connection,
+    exchange_id: str,
+    symbol: str,
+    timeframe: str,
+    start_ms: int,
+    end_ms: int,
+    status: str,
+    candle_count: int,
+    error: str | None,
+    csv_path: Path,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO fetch_metadata (
+            exchange_id, symbol, timeframe, start_ms, end_ms,
+            status, candle_count, error, csv_path, retrieved_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            exchange_id,
+            symbol,
+            timeframe,
+            start_ms,
+            end_ms,
+            status,
+            candle_count,
+            error,
+            str(csv_path),
+            iso_utc(int(time.time() * 1000)),
+        ),
+    )
+
+
+def expected_timestamps(start_ms: int, end_ms: int, timeframe_ms: int) -> list[int]:
+    return list(range(start_ms, end_ms + 1, timeframe_ms))
+
+
+def build_coverage_report(
+    conn: sqlite3.Connection,
+    exchange_id: str,
+    symbols: list[str],
+    timeframe: str,
+    start_ms: int,
+    end_ms: int,
+) -> dict[str, Any]:
+    expected = expected_timestamps(start_ms, end_ms, timeframe_to_ms(timeframe))
+    expected_set = set(expected)
+    symbol_reports: list[dict[str, Any]] = []
+    unavailable_symbols: list[str] = []
+
+    latest_status = {
+        row[0]: row[1]
+        for row in conn.execute(
+            """
+            SELECT symbol, status
+            FROM fetch_metadata
+            WHERE exchange_id = ? AND timeframe = ? AND start_ms = ? AND end_ms = ?
+            ORDER BY id
+            """,
+            (exchange_id, timeframe, start_ms, end_ms),
+        )
+    }
+
+    for symbol in symbols:
+        rows = conn.execute(
+            """
+            SELECT timestamp_ms, COUNT(*)
+            FROM candles
+            WHERE exchange_id = ? AND symbol = ? AND timeframe = ? AND timestamp_ms BETWEEN ? AND ?
+            GROUP BY timestamp_ms
+            ORDER BY timestamp_ms
+            """,
+            (exchange_id, symbol, timeframe, start_ms, end_ms),
+        ).fetchall()
+        present = {int(timestamp_ms) for timestamp_ms, _count in rows}
+        duplicate_count = sum(int(count) - 1 for _timestamp_ms, count in rows if int(count) > 1)
+        missing = sorted(expected_set - present)
+        status = latest_status.get(symbol, "not_requested")
+        if status != "success" or not rows:
+            unavailable_symbols.append(symbol)
+        symbol_reports.append(
+            {
+                "symbol": symbol,
+                "status": status,
+                "candle_count": len(present),
+                "expected_count": len(expected),
+                "missing_count": len(missing),
+                "missing_intervals": [iso_utc(ts) for ts in missing[:50]],
+                "duplicate_timestamps": duplicate_count,
+                "complete": status == "success" and len(missing) == 0 and duplicate_count == 0,
+            }
+        )
+
+    incomplete_symbols = [item["symbol"] for item in symbol_reports if not item["complete"]]
+    return {
+        "exchange": exchange_id,
+        "timeframe": timeframe,
+        "start": iso_utc(start_ms),
+        "end": iso_utc(end_ms),
+        "expected_count_per_symbol": len(expected),
+        "symbols": symbol_reports,
+        "incomplete_symbols": incomplete_symbols,
+        "unavailable_symbols": unavailable_symbols,
+    }
+
+
+def write_coverage_reports(report: dict[str, Any], json_path: Path, markdown_path: Path) -> None:
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with json_path.open("w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+    lines = [
+        "# Market Data Coverage Report",
+        "",
+        f"Exchange: `{report['exchange']}`",
+        f"Timeframe: `{report['timeframe']}`",
+        f"Window: `{report['start']}` to `{report['end']}`",
+        f"Expected candles per symbol: `{report['expected_count_per_symbol']}`",
+        "",
+        "| Symbol | Status | Candles | Expected | Missing | Duplicates | Complete |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for item in report["symbols"]:
+        lines.append(
+            "| {symbol} | {status} | {candle_count} | {expected_count} | {missing_count} | "
+            "{duplicate_timestamps} | {complete} |".format(**item)
+        )
+    lines.extend(["", "## Incomplete Symbols", ""])
+    lines.extend(f"- `{symbol}`" for symbol in report["incomplete_symbols"])
+    if not report["incomplete_symbols"]:
+        lines.append("- None")
+    lines.extend(["", "## Missing Interval Samples", ""])
+    for item in report["symbols"]:
+        if item["missing_intervals"]:
+            sample = ", ".join(f"`{timestamp}`" for timestamp in item["missing_intervals"])
+            lines.append(f"- `{item['symbol']}`: {sample}")
+    if not any(item["missing_intervals"] for item in report["symbols"]):
+        lines.append("- None")
+    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def run_download(exchange: Any, args: argparse.Namespace) -> dict[str, Any]:
     out_dir = Path(args.out)
+    db_path = Path(args.db) if args.db else out_dir / DEFAULT_DB_NAME
     start_ms = parse_utc_ms(args.start)
     end_ms = parse_utc_ms(args.end)
     if end_ms < start_ms:
@@ -144,11 +418,14 @@ def run_download(exchange: Any, args: argparse.Namespace) -> dict[str, Any]:
     markets = exchange.load_markets()
     all_symbols = resolve_active_swap_symbols(markets)
     symbols = select_symbols(all_symbols, args.symbols, args.symbol_limit)
+    conn = init_storage(db_path)
+    store_symbol_catalog(conn, args.exchange, markets)
     manifest: dict[str, Any] = {
         "exchange": args.exchange,
         "timeframe": args.timeframe,
         "start": iso_utc(start_ms),
         "end": iso_utc(end_ms),
+        "sqlite_path": str(db_path),
         "active_swap_symbol_count": len(all_symbols),
         "requested_symbols": symbols,
         "successes": [],
@@ -169,16 +446,30 @@ def run_download(exchange: Any, args: argparse.Namespace) -> dict[str, Any]:
         )
         csv_path = out_dir / f"{safe_symbol_filename(symbol)}.csv"
         write_candles_csv(csv_path, symbol, candles)
+        store_candles(conn, args.exchange, symbol, args.timeframe, candles)
         record = {"symbol": symbol, "candles": len(candles), "path": str(csv_path)}
         if error:
+            store_fetch_metadata(
+                conn, args.exchange, symbol, args.timeframe, start_ms, end_ms, "failed", len(candles), error, csv_path
+            )
             record["error"] = error
             manifest["failures"].append(record)
         else:
+            store_fetch_metadata(
+                conn, args.exchange, symbol, args.timeframe, start_ms, end_ms, "success", len(candles), None, csv_path
+            )
             manifest["successes"].append(record)
+        conn.commit()
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    coverage = build_coverage_report(conn, args.exchange, symbols, args.timeframe, start_ms, end_ms)
+    coverage_json_path = out_dir / "coverage_report.json"
+    coverage_markdown_path = out_dir / "coverage_report.md"
+    write_coverage_reports(coverage, coverage_json_path, coverage_markdown_path)
+    conn.close()
     manifest_path = out_dir / "manifest.json"
     manifest["manifest_path"] = str(manifest_path)
+    manifest["coverage_report_path"] = str(coverage_markdown_path)
     with manifest_path.open("w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
         handle.write("\n")
@@ -192,6 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start", default=DEFAULT_START, help="inclusive UTC start timestamp")
     parser.add_argument("--end", default=DEFAULT_END, help="inclusive UTC end timestamp")
     parser.add_argument("--out", default=DEFAULT_OUT, help="output directory for CSV files and manifest")
+    parser.add_argument("--db", default=None, help="SQLite database path; defaults to <out>/market_data.sqlite")
     parser.add_argument("--symbols", default=None, help="comma-separated active swap symbols for a smoke subset")
     parser.add_argument("--symbol-limit", type=int, default=None, help="first N active swap symbols for smoke testing")
     parser.add_argument("--limit", type=int, default=1000, help="per-request candle limit")
@@ -212,7 +504,8 @@ def main(argv: list[str] | None = None) -> int:
     manifest = run_download(exchange, args)
     print(
         f"wrote {len(manifest['successes'])} successful symbols and "
-        f"{len(manifest['failures'])} failures to {manifest['manifest_path']}",
+        f"{len(manifest['failures'])} failures to {manifest['manifest_path']} "
+        f"with coverage at {manifest['coverage_report_path']}",
         flush=True,
     )
     return 0
