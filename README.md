@@ -3,6 +3,8 @@ agenticaita_paper2code_validation
 
 ## Hyperliquid OHLCV Downloader
 
+This workflow reconstructs public market conditions for the AGENTICAITA paper window. It does not reproduce the original agent decisions or dry-run audit log unless the authors' original artefacts are provided.
+
 Install dependencies:
 
 ```bash
@@ -22,6 +24,8 @@ python scripts/fetch_hyperliquid_ohlcv.py
 ```
 
 The default window is `2026-04-06T00:00:00Z` through `2026-04-11T23:59:59Z`, using `ccxt.hyperliquid` and `1m` candles. Raw per-symbol OHLCV CSV files, `manifest.json`, `market_data.sqlite`, and coverage reports are written under `data/hyperliquid_ohlcv/`, which is intentionally ignored by git. Funding-rate history is requested with CCXT `fetch_funding_rate_history` when the exchange exposes it; unavailable or empty funding history is recorded as metadata and does not block OHLCV reconstruction.
+
+Expected runtime and storage depend on exchange rate limits and active symbol count. A three-symbol smoke run should complete in minutes and use a small local SQLite/CSV footprint. An all-symbol one-minute download for the full five-day window can take tens of minutes or longer and may require hundreds of MB after CSV, SQLite, manifest, and report outputs are included.
 
 The SQLite database is created automatically. Its validation-facing schema is:
 
@@ -44,6 +48,27 @@ python scripts/fetch_hyperliquid_ohlcv.py --funding-limit 1000
 ```
 
 Failures are recorded per symbol in `manifest.json`; one symbol failure does not abort the rest of the run.
+
+If Hyperliquid historical coverage is incomplete, rerun with explicit subsets to isolate missing markets, then use CCXT-compatible fallback venues only for comparable public market-condition checks:
+
+```bash
+python scripts/fetch_hyperliquid_ohlcv.py --symbols BTC/USDC:USDC,ETH/USDC:USDC
+python scripts/fetch_hyperliquid_ohlcv.py --exchange binanceusdm --symbols BTC/USDT:USDT,ETH/USDT:USDT --out data/binanceusdm_ohlcv
+```
+
+Fallback exchange data is not a replacement for the paper's exact Hyperliquid session. It can support sensitivity checks against public OHLCV/funding conditions, but exchange symbols, contract specs, liquidity, funding cadence, and available history may differ.
+
+### Reconstruction Limitations
+
+Generated coverage and real-data validation reports make these limitations explicit:
+
+| Can validate from public APIs | Cannot recover from public APIs |
+| --- | --- |
+| OHLCV coverage for requested symbols and window | Original L2 order book snapshots |
+| Funding-rate availability where the exchange exposes history | Original prompts, LLM calls, agent negotiations, and risk-manager approvals |
+| Exploratory AZTE/CBD metrics derived from public candles | The paper's original SQLite dry-run database and trade provenance |
+
+Treat this as reproduction of public market conditions, not reproduction of original agent decisions. The historical reconstruction can show what market data was available through public APIs and can compute deterministic derived metrics, but it cannot validate claims that depend on unreleased agent logs, L2 snapshots, prompts, or the original SQLite records.
 
 ## AZTE And CBD Metrics
 
