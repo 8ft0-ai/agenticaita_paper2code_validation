@@ -5,6 +5,17 @@ agenticaita_paper2code_validation
 
 This workflow reconstructs public market conditions for the AGENTICAITA paper window. It does not reproduce the original agent decisions or dry-run audit log unless the authors' original artefacts are provided.
 
+## Historical Real-Data Validation Plan
+
+The issue #7 tracking plan is now represented by the repository workflow:
+
+1. Fetch Hyperliquid one-minute perpetual OHLCV and available funding history for `2026-04-06T00:00:00Z` through `2026-04-11T23:59:59Z` with `scripts/fetch_hyperliquid_ohlcv.py`.
+2. Review generated `coverage_report.md` / `coverage_report.json` for symbol coverage, gaps, duplicates, funding availability, and per-symbol failures.
+3. Compute deterministic AZTE/CBD reconstruction metrics from the downloaded SQLite store with `scripts/compute_azte_cbd_metrics.py`.
+4. Run `AgenticAITA_claim_validation_repo/validate_claims.py --market-db ...` to produce real-data validation reports.
+
+This plan can validate public market-data-dependent checks only. It cannot recover the paper's original L2 order book snapshots, LLM decisions, prompts, risk-manager approvals, SQLite logs, or exact dry-run trade path without those original artifacts.
+
 Install dependencies:
 
 ```bash
