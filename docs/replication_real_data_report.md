@@ -214,6 +214,8 @@ Rows:
 
 The dedicated export helper can now emit either close-only or full-OHLCV input. The calibrated runs in this report used close-only input. Subsequent OHLCV execution work uses full-OHLCV input to simulate stop-loss and take-profit exits over future bars with a conservative stop-loss-first tie-breaker when both thresholds are touched in the same candle.
 
+Replication outputs now include a `metadata` block in `summary.json` and a `Run Metadata` section in `replication_report.md`. These record the data source, asset and candle counts, provenance columns such as exchange and source symbol when available, config values, execution mode, and git commit SHA when available.
+
 ## Initial Real-Data Replication Run
 
 The first real-data run used the original replication defaults:
@@ -517,7 +519,6 @@ Recommended order:
 
 1. Extend replication input loading from `timestamp,asset,close` to full `timestamp,asset,open,high,low,close,volume`.
 2. Replace fixed-horizon exits with stop-loss/take-profit/timeout execution over OHLC bars.
-3. Add run metadata to reports so calibrated parameters are written directly into `summary.json` and `replication_report.md`.
-4. Run a larger all-active-symbol Binance or Bybit fallback universe to test whether counts remain stable outside the 15-symbol subset.
-5. If Hyperliquid OHLCV becomes available, rerun the calibrated harness on the preferred venue.
-6. Keep the report language explicit: these runs are functional architecture replications, not empirical reproductions of the original five-day dry-run.
+3. Run a larger all-active-symbol Binance or Bybit fallback universe to test whether counts remain stable outside the 15-symbol subset.
+4. If Hyperliquid OHLCV becomes available, rerun the calibrated harness on the preferred venue.
+5. Keep the report language explicit: these runs are functional architecture replications, not empirical reproductions of the original five-day dry-run.

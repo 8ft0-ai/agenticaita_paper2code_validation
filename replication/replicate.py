@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +18,57 @@ from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_
 
 def load_config(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def get_git_commit_sha(repo_root: Path | None = None) -> str | None:
+    repo_root = repo_root or Path(__file__).resolve().parents[1]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
+def build_config_metadata(cfg: dict) -> dict:
+    return {
+        "experiment": {key: cfg["experiment"].get(key) for key in ("name", "mode", "seed") if key in cfg["experiment"]},
+        "azte": dict(cfg["azte"]),
+        "igp": dict(cfg["igp"]),
+        "risk": dict(cfg["risk"]),
+        "cbd": dict(cfg["cbd"]),
+        "cost_scenarios": dict(cfg["cost_scenarios"]),
+        "synthetic_data": dict(cfg.get("synthetic_data", {})),
+    }
+
+
+def build_data_metadata(ohlcv: pd.DataFrame, data_source: str) -> dict:
+    assets = sorted(str(asset) for asset in ohlcv["asset"].dropna().unique()) if "asset" in ohlcv else []
+    per_asset_counts = {str(asset): int(count) for asset, count in ohlcv.groupby("asset").size().sort_index().items()} if "asset" in ohlcv else {}
+    metadata: dict = {
+        "data_source": data_source,
+        "columns": list(ohlcv.columns),
+        "candle_count": int(len(ohlcv)),
+        "asset_count": len(assets),
+        "assets": assets,
+        "per_asset_candle_counts": per_asset_counts,
+    }
+    if "source_symbol" in ohlcv:
+        metadata["source_symbols"] = sorted(str(symbol) for symbol in ohlcv["source_symbol"].dropna().unique())
+    if "exchange_id" in ohlcv:
+        metadata["exchange_ids"] = sorted(str(exchange) for exchange in ohlcv["exchange_id"].dropna().unique())
+    if "timeframe" in ohlcv:
+        metadata["timeframes"] = sorted(str(timeframe) for timeframe in ohlcv["timeframe"].dropna().unique())
+    if not ohlcv.empty and "timestamp" in ohlcv:
+        metadata["start_timestamp"] = str(ohlcv["timestamp"].min())
+        metadata["end_timestamp"] = str(ohlcv["timestamp"].max())
+    return metadata
 
 
 def main() -> None:
@@ -82,6 +134,17 @@ def main() -> None:
             "intrabar_tie_breaker": "stop_loss_first",
             "stop_take_profit_enabled": simulator.execution_model == "ohlcv_intrabar_stop_take_profit",
         },
+        "metadata": {
+            "git_commit_sha": get_git_commit_sha(),
+            "config": build_config_metadata(cfg),
+            "data": build_data_metadata(ohlcv, data_source),
+            "execution": {
+                "execution_model": simulator.execution_model,
+                "exit_horizon_minutes": sim_cfg.exit_horizon_minutes,
+                "intrabar_tie_breaker": "stop_loss_first",
+                "stop_take_profit_enabled": simulator.execution_model == "ohlcv_intrabar_stop_take_profit",
+            },
+        },
         "summary": summary.to_dict(),
         "transaction_cost_sensitivity": costs,
         "caveat": "Synthetic data and deterministic proxy agents do not validate the paper's live-market claims.",
@@ -95,6 +158,12 @@ def main() -> None:
         "This run executes the paper's published architecture in dry-run form: AZTE trigger, CBD score, sequential analyst/risk/executor pipeline, deterministic risk gates, IGP cooldowns, SQLite audit tables, and transaction-cost sensitivity.",
         "",
         "It is not an empirical replication unless supplied with the author's raw market data, order-book/funding snapshots, exact prompts, LLM outputs, and SQLite logs.",
+        "",
+        "## Run Metadata",
+        "",
+        "```json",
+        json.dumps(report["metadata"], indent=2),
+        "```",
         "",
         "## Execution Model",
         "",
