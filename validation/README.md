@@ -1,8 +1,10 @@
-# AGENTICAITA claim validation
+# AGENTICAITA validation
 
-This repository is a small Paper2Code-style implementation for validating the numerical and statistical claims in `2605.12532v1.pdf`.
+This directory is a small Paper2Code-style implementation for validating the numerical and statistical claims in `2605.12532v1.pdf`.
 
-It does not attempt to recreate the live trading system. The paper does not provide the raw SQLite database, exchange fills, market data, LLM call logs, funding-rate series, or production configuration. Instead, it validates the claims that are reproducible from the paper's reported quantities and flags claims that need missing artefacts.
+It does not attempt to recreate the live trading system. The paper does not provide the raw SQLite database, exchange fills, market data, LLM call logs, funding-rate series, or production configuration. Instead, this validates the claims that are reproducible from the paper's reported quantities and flags claims that need missing artefacts.
+
+This is complementary to `../replication/`: validation asks whether the reported numbers are internally consistent, while replication asks whether an auditable dry-run architecture can be executed to produce comparable artefacts.
 
 ## Run
 

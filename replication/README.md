@@ -1,6 +1,6 @@
-# AGENTICAITA replication harness
+# AGENTICAITA replication
 
-This repository moves the previous PDF-only claim audit one step closer to replication.
+This directory moves the PDF-only claim audit in `../validation/` one step closer to executable replication.
 
 It implements an executable dry-run version of the published architecture:
 
@@ -15,7 +15,7 @@ It implements an executable dry-run version of the published architecture:
 ## Important boundary
 
 This is a **functional architecture replication**, not an empirical replication of the authors' five-day live dry-run.
-It does not prove the reported 157 invocations, 139 trades, zero intervention, BTC benchmark, or CBD asset outcomes.
+It does not prove the reported 157 invocations, 139 trades, zero intervention, BTC benchmark, or CBD asset outcomes; those counts are generated for a new run rather than recovered from the original session.
 Those require the author's raw SQLite database, market snapshots, order books, funding rates, prompts, LLM outputs,
 and exact exchange/session configuration.
 
