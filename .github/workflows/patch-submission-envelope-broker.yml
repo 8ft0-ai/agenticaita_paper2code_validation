@@ -26,10 +26,11 @@ jobs:
         with:
           ref: patch-submissions
           fetch-depth: 0
+          token: ${{ secrets.PATCH_BOT_TOKEN || github.token }}
 
       - name: Fetch broker script from main
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PATCH_BOT_TOKEN || github.token }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/patch-submission-broker"
@@ -46,7 +47,7 @@ jobs:
 
       - name: Process patch submission envelope
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PATCH_BOT_TOKEN || github.token }}
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
