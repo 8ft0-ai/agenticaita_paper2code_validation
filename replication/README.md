@@ -12,6 +12,8 @@ It implements an executable dry-run version of the published architecture:
 6. **Audit artefacts**: `pipeline_log`, `trades`, and `vol_history` written to CSV and SQLite.
 7. **Cost sensitivity**: paper-style round-trip notional cost scenarios.
 
+When full OHLCV input is supplied, approved trades use intrabar stop-loss and take-profit execution over future OHLC bars. If stop-loss and take-profit are both touched in the same candle, the simulator uses a conservative stop-loss-first tie-breaker because OHLCV does not reveal the intrabar path. Close-only inputs remain supported and fall back to deterministic fixed-horizon close exits.
+
 ## Important boundary
 
 This is a **functional architecture replication**, not an empirical replication of the authors' five-day live dry-run.
@@ -33,7 +35,7 @@ Optional real-data input:
 python replicate.py --input-csv path/to/ohlcv.csv --out results_real_data
 ```
 
-The CSV must contain at least `timestamp,asset,close`. Full OHLCV input is also accepted with optional `open,high,low,volume` columns; those columns are preserved in `ohlcv_used.csv` for later execution-realism work.
+The CSV must contain at least `timestamp,asset,close`. Full OHLCV input is also accepted with optional `open,high,low,volume` columns; when `high` and `low` are present, the executor uses stop-loss/take-profit exits instead of close-only fixed-horizon exits.
 
 Downloaded market-data SQLite stores can be converted into replication input from the repository root:
 

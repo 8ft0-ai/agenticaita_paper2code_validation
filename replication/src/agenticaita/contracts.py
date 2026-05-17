@@ -38,14 +38,18 @@ class RiskDecision:
 @dataclass(frozen=True)
 class ExecutionRecord:
     timestamp: str
+    exit_timestamp: str
     asset: str
     signal: Signal
     entry_price: float
     exit_price: float
+    stop_loss: float
+    take_profit: float
     size_usd: float
     gross_pnl_usd: float
     net_pnl_usd: float
     reason: str
+    execution_model: str
     dry_run: bool = True
 
     def to_dict(self) -> dict:

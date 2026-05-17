@@ -212,7 +212,7 @@ Rows:
 129,600
 ```
 
-The dedicated export helper can now emit either close-only or full-OHLCV input. The calibrated runs in this report used close-only input, and the simulator still uses close prices for execution until the OHLC stop-loss/take-profit issue is implemented.
+The dedicated export helper can now emit either close-only or full-OHLCV input. The calibrated runs in this report used close-only input. Subsequent OHLCV execution work uses full-OHLCV input to simulate stop-loss and take-profit exits over future bars with a conservative stop-loss-first tie-breaker when both thresholds are touched in the same candle.
 
 ## Initial Real-Data Replication Run
 
@@ -438,19 +438,19 @@ This brought the run close to the paper on invocations, trades, friction, and pr
 
 ### 4. The Remaining Gap Is Execution Semantics
 
-After calibration, counts and friction were close, but win rate and net PnL still differed. The most likely reason is that the executor uses close-only fixed-horizon exits, while the paper reports stop-loss and take-profit behavior.
+After calibration, counts and friction were close, but win rate and net PnL still differed. The most likely reason is that the original calibrated run used close-only fixed-horizon exits, while the paper reports stop-loss and take-profit behavior.
 
-Current harness behavior:
+Close-only fallback behavior:
 
 ```text
 entry = current close
 exit = close after fixed horizon
 ```
 
-More paper-aligned behavior would use:
+More paper-aligned OHLCV behavior uses:
 
 ```text
-entry = current close or next open
+entry = current close
 stop loss = derived from Analyst/Risk Manager output
 take profit = derived from Analyst/Risk Manager output
 exit = first intrabar OHLC hit, or timeout

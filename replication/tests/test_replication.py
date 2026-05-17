@@ -8,6 +8,7 @@ from src.agenticaita.azte import AdaptiveZScoreTriggerEngine
 from src.agenticaita.cbd import CBDInputs, cbd_score, z_tilde
 from src.agenticaita.contracts import AnalystDecision
 from src.agenticaita.risk import DeterministicRiskManager, RiskConfig
+from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig
 
 
 def test_load_ohlcv_csv_accepts_close_only(tmp_path) -> None:
@@ -86,6 +87,126 @@ def test_risk_hard_gates_reject_wait_and_large_size() -> None:
     assert not rm.evaluate(big).approved
 
 
+def test_risk_rejects_invalid_directional_exit_levels() -> None:
+    rm = DeterministicRiskManager(RiskConfig())
+    bad_long = AnalystDecision("BTC", "long", 0.9, 100, 101, 103, 100, 0.5, 2.1, "test")
+    bad_short = AnalystDecision("BTC", "short", 0.9, 100, 99, 101, 100, 0.5, 2.1, "test")
+
+    assert rm.evaluate(bad_long).rejection_reason == "invalid_long_exit_levels"
+    assert rm.evaluate(bad_short).rejection_reason == "invalid_short_exit_levels"
+
+
+def make_simulator_with_prices(rows: list[dict]) -> PipelineSimulator:
+    pd = pytest.importorskip("pandas")
+    sim = PipelineSimulator(SimulatorConfig(exit_horizon_minutes=3))
+    df = pd.DataFrame(rows)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    sim._prices_by_asset = {"BTC": df.sort_values("timestamp").reset_index(drop=True)}
+    return sim
+
+
+def make_decision(signal: str = "long") -> AnalystDecision:
+    if signal == "long":
+        return AnalystDecision("BTC", "long", 0.9, 100.0, 99.0, 102.0, 100.0, 0.5, 2.1, "test")
+    return AnalystDecision("BTC", "short", 0.9, 100.0, 101.0, 98.0, 100.0, 0.5, 2.1, "test")
+
+
+def test_ohlcv_long_stop_loss_hit() -> None:
+    sim = make_simulator_with_prices([
+        {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "open": 100, "high": 100, "low": 100, "close": 100},
+        {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "open": 100, "high": 101, "low": 98.5, "close": 100},
+    ])
+
+    record = sim._execute(sim._prices_by_asset["BTC"].iloc[0]["timestamp"], make_decision("long"), 100.0)
+
+    assert record.exit_price == 99.0
+    assert record.reason == "stop_loss_intrabar"
+    assert record.execution_model == "ohlcv_intrabar_stop_take_profit"
+    assert record.net_pnl_usd < 0
+
+
+def test_ohlcv_long_take_profit_hit() -> None:
+    sim = make_simulator_with_prices([
+        {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "open": 100, "high": 100, "low": 100, "close": 100},
+        {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "open": 100, "high": 102.5, "low": 99.5, "close": 101},
+    ])
+
+    record = sim._execute(sim._prices_by_asset["BTC"].iloc[0]["timestamp"], make_decision("long"), 100.0)
+
+    assert record.exit_price == 102.0
+    assert record.reason == "take_profit_intrabar"
+    assert record.net_pnl_usd > 0
+
+
+def test_ohlcv_short_stop_loss_hit() -> None:
+    sim = make_simulator_with_prices([
+        {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "open": 100, "high": 100, "low": 100, "close": 100},
+        {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "open": 100, "high": 101.5, "low": 99, "close": 100},
+    ])
+
+    record = sim._execute(sim._prices_by_asset["BTC"].iloc[0]["timestamp"], make_decision("short"), 100.0)
+
+    assert record.exit_price == 101.0
+    assert record.reason == "stop_loss_intrabar"
+    assert record.net_pnl_usd < 0
+
+
+def test_ohlcv_short_take_profit_hit() -> None:
+    sim = make_simulator_with_prices([
+        {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "open": 100, "high": 100, "low": 100, "close": 100},
+        {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "open": 100, "high": 100.5, "low": 97.5, "close": 99},
+    ])
+
+    record = sim._execute(sim._prices_by_asset["BTC"].iloc[0]["timestamp"], make_decision("short"), 100.0)
+
+    assert record.exit_price == 98.0
+    assert record.reason == "take_profit_intrabar"
+    assert record.net_pnl_usd > 0
+
+
+def test_ohlcv_same_bar_tie_uses_stop_loss() -> None:
+    sim = make_simulator_with_prices([
+        {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "open": 100, "high": 100, "low": 100, "close": 100},
+        {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "open": 100, "high": 103, "low": 98, "close": 101},
+    ])
+
+    record = sim._execute(sim._prices_by_asset["BTC"].iloc[0]["timestamp"], make_decision("long"), 100.0)
+
+    assert record.exit_price == 99.0
+    assert record.reason == "stop_loss_intrabar_tie_breaker"
+
+
+def test_ohlcv_no_hit_exits_at_horizon_close() -> None:
+    sim = make_simulator_with_prices([
+        {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "open": 100, "high": 100, "low": 100, "close": 100},
+        {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "open": 100, "high": 101, "low": 99.5, "close": 100.5},
+        {"timestamp": "2026-04-06T00:02:00Z", "asset": "BTC", "open": 100.5, "high": 101.5, "low": 99.5, "close": 101.0},
+    ])
+
+    record = sim._execute(sim._prices_by_asset["BTC"].iloc[0]["timestamp"], make_decision("long"), 100.0)
+
+    assert record.exit_price == 101.0
+    assert record.reason == "fixed_horizon_ohlcv_timeout"
+
+
+def test_close_only_execution_fallback_remains_deterministic() -> None:
+    pd = pytest.importorskip("pandas")
+    sim = PipelineSimulator(SimulatorConfig(exit_horizon_minutes=2))
+    df = pd.DataFrame([
+        {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 100.0},
+        {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "close": 101.0},
+        {"timestamp": "2026-04-06T00:02:00Z", "asset": "BTC", "close": 102.0},
+    ])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    sim._prices_by_asset = {"BTC": df}
+
+    record = sim._execute(df.iloc[0]["timestamp"], make_decision("long"), 100.0)
+
+    assert record.exit_price == 102.0
+    assert record.reason == "fixed_horizon_close_only_fallback"
+    assert record.execution_model == "close_only_fixed_horizon"
+
+
 def test_simulator_writes_audit_tables(tmp_path) -> None:
     pd = pytest.importorskip("pandas")
 
@@ -97,6 +218,8 @@ def test_simulator_writes_audit_tables(tmp_path) -> None:
     pipeline_log, trades, vol_history = sim.run(df)
     assert not vol_history.empty
     assert set(["timestamp", "asset", "event"]).issubset(pipeline_log.columns) or pipeline_log.empty
+    if not trades.empty:
+        assert {"exit_timestamp", "stop_loss", "take_profit", "execution_model"}.issubset(trades.columns)
     sqlite_path = tmp_path / "run.sqlite"
     write_sqlite(sqlite_path, pipeline_log, trades, vol_history)
     with sqlite3.connect(sqlite_path) as conn:
