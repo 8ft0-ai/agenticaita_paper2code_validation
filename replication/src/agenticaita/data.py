@@ -7,7 +7,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
+NUMERIC_COLUMNS = ("open", "high", "low", "close", "volume", "funding_rate")
 
 
 def load_ohlcv_csv(path: str | Path) -> pd.DataFrame:
@@ -18,7 +18,7 @@ def load_ohlcv_csv(path: str | Path) -> pd.DataFrame:
         raise ValueError(f"CSV missing required columns: {sorted(missing)}")
     df = df.copy()
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    for column in OHLCV_COLUMNS:
+    for column in NUMERIC_COLUMNS:
         if column in df.columns:
             df[column] = df[column].astype(float)
     return df.sort_values(["timestamp", "asset"]).reset_index(drop=True)
