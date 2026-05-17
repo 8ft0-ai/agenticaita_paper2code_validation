@@ -110,6 +110,52 @@ def test_replication_metadata_helpers_include_config_and_data_fields() -> None:
     assert data_metadata["exchange_ids"] == ["binanceusdm"]
     assert data_metadata["source_symbols"] == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
     assert data_metadata["timeframes"] == ["1m"]
+    assert data_metadata["funding"] == {"funding_rate_column": False, "status": "unsupported"}
+
+
+def test_funding_accounting_marks_missing_funding_as_qualified() -> None:
+    pd = pytest.importorskip("pandas")
+
+    from src.agenticaita.metrics import funding_accounting
+
+    ohlcv = pd.DataFrame(
+        [
+            {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 100.0, "funding_rate": 0.0001},
+            {"timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "close": 101.0, "funding_rate": 0.0002},
+            {"timestamp": "2026-04-06T00:00:00Z", "asset": "ETH", "close": 10.0, "funding_rate": None},
+            {"timestamp": "2026-04-06T00:01:00Z", "asset": "ETH", "close": 10.5, "funding_rate": None},
+        ]
+    )
+    trades = pd.DataFrame(
+        [
+            {"timestamp": "2026-04-06T00:00:00Z", "exit_timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "signal": "long", "size_usd": 100.0, "net_pnl_usd": 1.0},
+            {"timestamp": "2026-04-06T00:00:00Z", "exit_timestamp": "2026-04-06T00:01:00Z", "asset": "ETH", "signal": "short", "size_usd": 100.0, "net_pnl_usd": -1.0},
+        ]
+    )
+
+    accounting = funding_accounting(ohlcv, trades)
+
+    assert accounting["price_only"]["status"] == "available"
+    assert accounting["funding_aware"]["status"] == "qualified"
+    assert accounting["funding_aware"]["missing_funding_assets"] == ["ETH"]
+    assert accounting["funding_aware"]["unsupported_trade_count"] == 1
+    assert accounting["funding_aware"]["net_funding_pnl_usd"] == pytest.approx(-0.02)
+
+
+def test_funding_accounting_marks_absent_funding_column_unsupported() -> None:
+    pd = pytest.importorskip("pandas")
+
+    from src.agenticaita.metrics import funding_accounting
+
+    ohlcv = pd.DataFrame([{"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 100.0}])
+    trades = pd.DataFrame(
+        [{"timestamp": "2026-04-06T00:00:00Z", "exit_timestamp": "2026-04-06T00:01:00Z", "asset": "BTC", "signal": "long", "size_usd": 100.0, "net_pnl_usd": 1.0}]
+    )
+
+    accounting = funding_accounting(ohlcv, trades)
+
+    assert accounting["funding_aware"]["status"] == "unsupported"
+    assert accounting["funding_aware"]["missing_funding_assets"] == ["BTC"]
 
 
 def test_replicate_outputs_run_metadata(tmp_path) -> None:

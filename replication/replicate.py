@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 from src.agenticaita.data import generate_synthetic_ohlcv, load_ohlcv_csv
-from src.agenticaita.metrics import summarise, transaction_cost_sensitivity
+from src.agenticaita.metrics import funding_accounting, summarise, transaction_cost_sensitivity
 from src.agenticaita.risk import RiskConfig
 from src.agenticaita.agents import AnalystConfig
 from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_sqlite
@@ -65,6 +65,16 @@ def build_data_metadata(ohlcv: pd.DataFrame, data_source: str) -> dict:
         metadata["exchange_ids"] = sorted(str(exchange) for exchange in ohlcv["exchange_id"].dropna().unique())
     if "timeframe" in ohlcv:
         metadata["timeframes"] = sorted(str(timeframe) for timeframe in ohlcv["timeframe"].dropna().unique())
+    if "funding_rate" in ohlcv:
+        funding = ohlcv.dropna(subset=["funding_rate"])
+        metadata["funding"] = {
+            "funding_rate_column": True,
+            "funding_rows": int(len(funding)),
+            "funding_rows_by_asset": {str(asset): int(count) for asset, count in funding.groupby("asset").size().sort_index().items()},
+            "assets_without_funding_rows": sorted(str(asset) for asset in set(assets) - set(str(asset) for asset in funding["asset"].dropna().unique())),
+        }
+    else:
+        metadata["funding"] = {"funding_rate_column": False, "status": "unsupported"}
     if not ohlcv.empty and "timestamp" in ohlcv:
         metadata["start_timestamp"] = str(ohlcv["timestamp"].min())
         metadata["end_timestamp"] = str(ohlcv["timestamp"].max())
@@ -125,6 +135,7 @@ def main() -> None:
 
     total_notional = float(trades["size_usd"].sum()) if not trades.empty else 0.0
     costs = transaction_cost_sensitivity(summary.net_pnl_usd, total_notional, cfg["cost_scenarios"])
+    funding = funding_accounting(ohlcv, trades)
     report = {
         "data_source": data_source,
         "replication_level": "functional architecture replication, not empirical replication",
@@ -146,6 +157,7 @@ def main() -> None:
             },
         },
         "summary": summary.to_dict(),
+        "benchmark_modes": funding,
         "transaction_cost_sensitivity": costs,
         "caveat": "Synthetic data and deterministic proxy agents do not validate the paper's live-market claims.",
     }
@@ -175,6 +187,12 @@ def main() -> None:
         "",
         "```json",
         json.dumps(summary.to_dict(), indent=2),
+        "```",
+        "",
+        "## Benchmark Modes",
+        "",
+        "```json",
+        json.dumps(funding, indent=2),
         "```",
         "",
         "## Transaction-cost sensitivity",

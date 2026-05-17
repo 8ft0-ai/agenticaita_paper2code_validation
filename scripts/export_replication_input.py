@@ -14,6 +14,7 @@ from pathlib import Path
 PROVENANCE_COLUMNS = ("exchange_id", "source_symbol", "timeframe")
 CLOSE_COLUMNS = ("timestamp", "asset", *PROVENANCE_COLUMNS, "close")
 OHLCV_COLUMNS = ("timestamp", "asset", *PROVENANCE_COLUMNS, "open", "high", "low", "close", "volume")
+FUNDING_COLUMN = "funding_rate"
 
 
 def base_asset_from_symbol(symbol: str) -> str:
@@ -42,6 +43,11 @@ def timeframe_to_ms(timeframe: str) -> int:
     amount = int(match.group(1))
     unit = match.group(2)
     return amount * {"m": 60_000, "h": 3_600_000, "d": 86_400_000}[unit]
+
+
+def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)).fetchone()
+    return row is not None
 
 
 def complete_symbols_from_sqlite(
@@ -87,24 +93,36 @@ def load_replication_rows(
     timeframe: str = "1m",
     symbols: list[str] | None = None,
     full_ohlcv: bool = False,
+    include_funding: bool = False,
 ) -> list[dict[str, str | float]]:
+    has_funding_table = include_funding and table_exists(conn, "funding_rates")
     query = [
-        "SELECT timestamp, exchange_id, symbol, timeframe, open, high, low, close, volume",
-        "FROM candles",
-        "WHERE timeframe = ?",
+        "SELECT c.timestamp, c.exchange_id, c.symbol, c.timeframe, c.open, c.high, c.low, c.close, c.volume",
     ]
+    if has_funding_table:
+        query.append(", f.funding_rate")
+    query.extend([
+        "FROM candles c",
+    ])
+    if has_funding_table:
+        query.append("LEFT JOIN funding_rates f ON f.exchange_id = c.exchange_id AND f.symbol = c.symbol AND f.timestamp_ms = c.timestamp_ms")
+    query.extend([
+        "WHERE c.timeframe = ?",
+    ]
+    )
     params: list[str] = [timeframe]
     if exchange_id:
-        query.append("AND exchange_id = ?")
+        query.append("AND c.exchange_id = ?")
         params.append(exchange_id)
     if symbols:
         placeholders = ",".join("?" for _ in symbols)
-        query.append(f"AND symbol IN ({placeholders})")
+        query.append(f"AND c.symbol IN ({placeholders})")
         params.extend(symbols)
-    query.append("ORDER BY timestamp_ms, symbol")
+    query.append("ORDER BY c.timestamp_ms, c.symbol")
 
     rows: list[dict[str, str | float]] = []
-    for timestamp, row_exchange_id, symbol, row_timeframe, open_, high, low, close, volume in conn.execute(" ".join(query), params):
+    for sqlite_row in conn.execute(" ".join(query), params):
+        timestamp, row_exchange_id, symbol, row_timeframe, open_, high, low, close, volume, *funding_values = sqlite_row
         row: dict[str, str | float] = {
             "timestamp": str(timestamp),
             "asset": base_asset_from_symbol(str(symbol)),
@@ -115,12 +133,17 @@ def load_replication_rows(
         }
         if full_ohlcv:
             row.update({"open": float(open_), "high": float(high), "low": float(low), "volume": float(volume)})
+        if include_funding:
+            funding_rate = funding_values[0] if funding_values else None
+            row[FUNDING_COLUMN] = "" if funding_rate is None else float(funding_rate)
         rows.append(row)
     return rows
 
 
-def write_replication_input(rows: list[dict[str, str | float]], path: str | Path, full_ohlcv: bool = False) -> None:
+def write_replication_input(rows: list[dict[str, str | float]], path: str | Path, full_ohlcv: bool = False, include_funding: bool = False) -> None:
     columns = OHLCV_COLUMNS if full_ohlcv else CLOSE_COLUMNS
+    if include_funding:
+        columns = (*columns, FUNDING_COLUMN)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -154,12 +177,13 @@ def run_export(args: argparse.Namespace) -> dict[str, int | str]:
             timeframe=args.timeframe,
             symbols=symbols,
             full_ohlcv=full_ohlcv,
+            include_funding=args.include_funding,
         )
     if args.symbols_out:
         symbols_path = Path(args.symbols_out)
         symbols_path.parent.mkdir(parents=True, exist_ok=True)
         symbols_path.write_text("\n".join(symbols or []) + ("\n" if symbols else ""), encoding="utf-8")
-    write_replication_input(rows, args.out, full_ohlcv=full_ohlcv)
+    write_replication_input(rows, args.out, full_ohlcv=full_ohlcv, include_funding=args.include_funding)
     return {"rows": len(rows), "symbols": len(symbols or []), "output": str(args.out), "format": args.format}
 
 
@@ -177,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--symbol-limit", type=int, default=None, help="maximum number of complete symbols to export")
     parser.add_argument("--required-symbol", default=None, help="complete symbol to prioritize before applying --symbol-limit")
     parser.add_argument("--symbols-out", default=None, help="optional path to write selected complete symbols")
+    parser.add_argument("--include-funding", action="store_true", help="append funding_rate from funding_rates rows when present")
     return parser
 
 

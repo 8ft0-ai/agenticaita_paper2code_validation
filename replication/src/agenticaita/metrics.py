@@ -90,3 +90,84 @@ def transaction_cost_sensitivity(net_pnl_usd: float, total_notional_usd: float, 
             "adjusted_net_pnl_usd": net_pnl_usd - cost,
         })
     return rows
+
+
+def funding_accounting(ohlcv: pd.DataFrame, trades: pd.DataFrame) -> dict:
+    price_only_net = float(trades["net_pnl_usd"].sum()) if not trades.empty else 0.0
+    price_only = {
+        "mode": "price_only",
+        "status": "available",
+        "net_pnl_usd": price_only_net,
+        "description": "Trade PnL from price moves only; funding is excluded.",
+    }
+    if "funding_rate" not in ohlcv.columns:
+        return {
+            "price_only": price_only,
+            "funding_aware": {
+                "mode": "funding_aware",
+                "status": "unsupported",
+                "reason": "input data has no funding_rate column",
+                "missing_funding_assets": sorted(str(asset) for asset in trades["asset"].dropna().unique()) if "asset" in trades else [],
+            },
+        }
+
+    funding = ohlcv[["timestamp", "asset", "funding_rate"]].copy()
+    funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+    funding = funding.dropna(subset=["funding_rate"])
+    funding_counts = {str(asset): int(count) for asset, count in funding.groupby("asset").size().sort_index().items()}
+    if trades.empty:
+        status = "available" if not funding.empty else "unsupported"
+        return {
+            "price_only": price_only,
+            "funding_aware": {
+                "mode": "funding_aware",
+                "status": status,
+                "funding_rows_by_asset": funding_counts,
+                "net_funding_pnl_usd": 0.0,
+                "funding_adjusted_net_pnl_usd": price_only_net,
+                "missing_funding_assets": [],
+            },
+        }
+    if funding.empty:
+        return {
+            "price_only": price_only,
+            "funding_aware": {
+                "mode": "funding_aware",
+                "status": "unsupported",
+                "reason": "funding_rate column is present but contains no funding rows",
+                "funding_rows_by_asset": funding_counts,
+                "missing_funding_assets": sorted(str(asset) for asset in trades["asset"].dropna().unique()),
+            },
+        }
+
+    net_funding_pnl = 0.0
+    unsupported_trades = 0
+    missing_assets: set[str] = set()
+    for trade in trades.itertuples(index=False):
+        asset = str(trade.asset)
+        asset_funding = funding[funding["asset"] == asset]
+        if asset_funding.empty:
+            unsupported_trades += 1
+            missing_assets.add(asset)
+            continue
+        entry_timestamp = pd.Timestamp(trade.timestamp)
+        exit_timestamp = pd.Timestamp(trade.exit_timestamp)
+        in_window = asset_funding[(asset_funding["timestamp"] > entry_timestamp) & (asset_funding["timestamp"] <= exit_timestamp)]
+        funding_rate_sum = float(in_window["funding_rate"].sum())
+        direction = 1.0 if trade.signal == "long" else -1.0
+        net_funding_pnl += -direction * float(trade.size_usd) * funding_rate_sum
+
+    status = "available" if unsupported_trades == 0 else "qualified"
+    return {
+        "price_only": price_only,
+        "funding_aware": {
+            "mode": "funding_aware",
+            "status": status,
+            "reason": None if status == "available" else "one or more traded assets have no funding rows",
+            "funding_rows_by_asset": funding_counts,
+            "missing_funding_assets": sorted(missing_assets),
+            "unsupported_trade_count": unsupported_trades,
+            "net_funding_pnl_usd": net_funding_pnl,
+            "funding_adjusted_net_pnl_usd": price_only_net + net_funding_pnl,
+        },
+    }
