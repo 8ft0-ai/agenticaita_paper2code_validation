@@ -33,7 +33,14 @@ Optional real-data input:
 python replicate.py --input-csv path/to/ohlcv.csv --out results_real_data
 ```
 
-The CSV must contain at least: `timestamp,asset,close`.
+The CSV must contain at least `timestamp,asset,close`. Full OHLCV input is also accepted with optional `open,high,low,volume` columns; those columns are preserved in `ohlcv_used.csv` for later execution-realism work.
+
+Downloaded market-data SQLite stores can be converted into replication input from the repository root:
+
+```bash
+python scripts/export_replication_input.py --db data/binanceusdm_ohlcv/market_data.sqlite --out data/binanceusdm_ohlcv/replication_input.csv
+python scripts/export_replication_input.py --db data/binanceusdm_ohlcv/market_data.sqlite --out data/binanceusdm_ohlcv/replication_input_ohlcv.csv --format ohlcv
+```
 
 ## Outputs
 
