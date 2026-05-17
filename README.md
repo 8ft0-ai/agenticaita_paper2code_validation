@@ -1,6 +1,26 @@
 # agenticaita_paper2code_validation
 agenticaita_paper2code_validation
 
+## Validation And Replication Scope
+
+This repository contains two complementary Paper2Code validation paths:
+
+| Directory | Purpose | Scenario | Main outputs |
+| --- | --- | --- | --- |
+| `validation/` | Checks whether the paper's reported quantities are internally consistent and flags claims that need missing artefacts. | Static claim audit / Paper2Code validation. | `validation_report.md`, JSON/CSV validation results, optional real-data validation reports. |
+| `replication/` | Runs an executable dry-run approximation of the published architecture. | Functional simulation / architecture replication. | SQLite audit DB, `pipeline_log.csv`, `trades.csv`, `vol_history.csv`, summary JSON, replication report. |
+
+`validation/` does not recreate the live trading system. It validates reproducible arithmetic and statistical claims from reported quantities such as invocations, trades, assets, PnL, cost scenarios, binomial checks, and CBD properties, while marking raw-data-dependent claims as unsupported.
+
+`replication/` does not prove the original five-day live dry-run results. It implements the published architecture components, including AZTE, CBD, a sequential Analyst -> Risk Manager -> Executor pipeline, risk hard gates, IGP cooldowns, audit artefacts, and cost sensitivity, so new runs can produce comparable artefacts.
+
+Both paths touch the same paper concepts, but they answer different questions:
+
+| Question | Directory |
+| --- | --- |
+| Are the paper's reported numbers internally consistent, and which claims are unsupported without missing artefacts? | `validation/` |
+| Can we build and run an auditable dry-run system matching the published architecture closely enough to generate comparable artefacts? | `replication/` |
+
 ## Hyperliquid OHLCV Downloader
 
 This workflow reconstructs public market conditions for the AGENTICAITA paper window. It does not reproduce the original agent decisions or dry-run audit log unless the authors' original artefacts are provided.
@@ -12,7 +32,7 @@ The issue #7 tracking plan is now represented by the repository workflow:
 1. Fetch Hyperliquid one-minute perpetual OHLCV and available funding history for `2026-04-06T00:00:00Z` through `2026-04-11T23:59:59Z` with `scripts/fetch_hyperliquid_ohlcv.py`.
 2. Review generated `coverage_report.md` / `coverage_report.json` for symbol coverage, gaps, duplicates, funding availability, and per-symbol failures.
 3. Compute deterministic AZTE/CBD reconstruction metrics from the downloaded SQLite store with `scripts/compute_azte_cbd_metrics.py`.
-4. Run `AgenticAITA_claim_validation_repo/validate_claims.py --market-db ...` to produce real-data validation reports.
+4. Run `validation/validate_claims.py --market-db ...` to produce real-data validation reports.
 
 This plan can validate public market-data-dependent checks only. It cannot recover the paper's original L2 order book snapshots, LLM decisions, prompts, risk-manager approvals, SQLite logs, or exact dry-run trade path without those original artifacts.
 
@@ -112,14 +132,14 @@ Warmup rows are retained and marked explicitly. CBD fields are populated only wh
 The paper-aggregate validation remains unchanged:
 
 ```bash
-cd AgenticAITA_claim_validation_repo
+cd validation
 python validate_claims.py --out results
 ```
 
 After downloading market data, run the separate real-data validation mode against the SQLite store:
 
 ```bash
-cd AgenticAITA_claim_validation_repo
+cd validation
 python validate_claims.py --market-db ../data/hyperliquid_ohlcv/market_data.sqlite --out results
 ```
 
