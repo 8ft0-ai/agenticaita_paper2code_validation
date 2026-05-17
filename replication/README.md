@@ -46,6 +46,16 @@ python scripts/export_replication_input.py --db data/binanceusdm_ohlcv/market_da
 
 Exports include provenance columns such as `exchange_id`, `source_symbol`, and `timeframe` so generated `summary.json` and `replication_report.md` can report exchange and symbol coverage.
 
+## Calibration Sweep
+
+Use `sweep.py` to run an in-process calibration grid without writing per-run audit databases:
+
+```bash
+python sweep.py --config config.yaml --input-csv ../data/binanceusdm_ohlcv/replication_input_ohlcv.csv --out results_calibration_sweep
+```
+
+The default 36-run grid varies `igp.global_cooldown_seconds`, `azte.z_threshold`, `risk.confidence_gate`, and `azte.absolute_return_floor`, then ranks each run by normalized absolute error against the paper aggregate targets. Use `--grid-json` for a custom grid and `--max-runs` for quick smoke tests. Outputs are written to `calibration_sweep_results.csv` and `calibration_sweep_top10.md`.
+
 ## Outputs
 
 - `results/agenticaita_replication.sqlite`
