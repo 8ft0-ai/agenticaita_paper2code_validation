@@ -9,10 +9,10 @@ azte:
   z_threshold: 2.0
   absolute_return_floor: 0.003
 igp:
-  global_cooldown_seconds: 1800
+  global_cooldown_seconds: 3000
   per_asset_cooldown_seconds: 300
 risk:
-  confidence_gate: 0.60
+  confidence_gate: 0.65
   max_stop_loss_fraction: 0.02
   max_position_size_usd: 500.0
   base_position_size_usd: 188.0
