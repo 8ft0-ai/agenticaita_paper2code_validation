@@ -5,7 +5,7 @@ import sqlite3
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, Dict, Iterable
+from typing import Deque, Dict
 
 import pandas as pd
 
@@ -30,6 +30,14 @@ class SimulatorConfig:
     transaction_cost_rate: float = 0.0
 
 
+@dataclass(frozen=True)
+class ExitResult:
+    timestamp: pd.Timestamp
+    price: float
+    reason: str
+    execution_model: str
+
+
 class PipelineSimulator:
     """Runs AZTE -> Analyst -> Risk Manager -> Executor over OHLCV closes."""
 
@@ -49,6 +57,7 @@ class PipelineSimulator:
         self._last_global_invocation: pd.Timestamp | None = None
         self._last_asset_invocation: Dict[str, pd.Timestamp] = {}
         self._prices_by_asset: dict[str, pd.DataFrame] = {}
+        self.execution_model = "close_only_fixed_horizon"
 
     def _cooldown_block_reason(self, timestamp: pd.Timestamp, asset: str) -> str | None:
         if self._last_global_invocation is not None:
@@ -61,29 +70,67 @@ class PipelineSimulator:
                 return "per_asset_cooldown"
         return None
 
-    def _future_exit_price(self, asset: str, timestamp: pd.Timestamp, fallback: float) -> float:
+    def _future_rows(self, asset: str, timestamp: pd.Timestamp) -> pd.DataFrame:
         asset_df = self._prices_by_asset[asset]
-        future = asset_df[asset_df["timestamp"] > timestamp].head(self.config.exit_horizon_minutes)
+        return asset_df[asset_df["timestamp"] > timestamp].head(self.config.exit_horizon_minutes)
+
+    def _close_only_exit(self, asset: str, timestamp: pd.Timestamp, fallback: float) -> ExitResult:
+        future = self._future_rows(asset, timestamp)
         if future.empty:
-            return fallback
-        return float(future.iloc[-1]["close"])
+            return ExitResult(timestamp, fallback, "no_future_close_only_fallback", "close_only_fixed_horizon")
+        row = future.iloc[-1]
+        return ExitResult(pd.Timestamp(row["timestamp"]), float(row["close"]), "fixed_horizon_close_only_fallback", "close_only_fixed_horizon")
+
+    def _ohlcv_exit(self, asset: str, timestamp: pd.Timestamp, decision) -> ExitResult:
+        future = self._future_rows(asset, timestamp)
+        if future.empty:
+            return ExitResult(timestamp, decision.entry_price, "no_future_ohlcv_fallback", "ohlcv_intrabar_stop_take_profit")
+
+        for row in future.itertuples(index=False):
+            row_timestamp = pd.Timestamp(row.timestamp)
+            high = float(row.high)
+            low = float(row.low)
+            if decision.signal == "long":
+                stop_hit = low <= decision.stop_loss
+                take_profit_hit = high >= decision.take_profit
+            else:
+                stop_hit = high >= decision.stop_loss
+                take_profit_hit = low <= decision.take_profit
+
+            if stop_hit:
+                reason = "stop_loss_intrabar_tie_breaker" if take_profit_hit else "stop_loss_intrabar"
+                return ExitResult(row_timestamp, decision.stop_loss, reason, "ohlcv_intrabar_stop_take_profit")
+            if take_profit_hit:
+                return ExitResult(row_timestamp, decision.take_profit, "take_profit_intrabar", "ohlcv_intrabar_stop_take_profit")
+
+        row = future.iloc[-1]
+        return ExitResult(pd.Timestamp(row["timestamp"]), float(row["close"]), "fixed_horizon_ohlcv_timeout", "ohlcv_intrabar_stop_take_profit")
+
+    def _exit_for_decision(self, timestamp: pd.Timestamp, decision) -> ExitResult:
+        if {"high", "low"}.issubset(self._prices_by_asset[decision.asset].columns):
+            return self._ohlcv_exit(decision.asset, timestamp, decision)
+        return self._close_only_exit(decision.asset, timestamp, decision.entry_price)
 
     def _execute(self, timestamp: pd.Timestamp, decision, size_usd: float) -> ExecutionRecord:
-        exit_price = self._future_exit_price(decision.asset, timestamp, decision.entry_price)
+        exit_result = self._exit_for_decision(timestamp, decision)
         direction = 1.0 if decision.signal == "long" else -1.0
-        gross_return = direction * (exit_price - decision.entry_price) / decision.entry_price
+        gross_return = direction * (exit_result.price - decision.entry_price) / decision.entry_price
         gross_pnl = size_usd * gross_return
         cost = size_usd * self.config.transaction_cost_rate
         return ExecutionRecord(
             timestamp=str(timestamp),
+            exit_timestamp=str(exit_result.timestamp),
             asset=decision.asset,
             signal=decision.signal,
             entry_price=decision.entry_price,
-            exit_price=exit_price,
+            exit_price=exit_result.price,
+            stop_loss=decision.stop_loss,
+            take_profit=decision.take_profit,
             size_usd=size_usd,
             gross_pnl_usd=gross_pnl,
             net_pnl_usd=gross_pnl - cost,
-            reason="fixed_horizon_synthetic_exit",
+            reason=exit_result.reason,
+            execution_model=exit_result.execution_model,
             dry_run=True,
         )
 
@@ -91,6 +138,7 @@ class PipelineSimulator:
         df = ohlcv.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df = df.sort_values(["timestamp", "asset"]).reset_index(drop=True)
+        self.execution_model = "ohlcv_intrabar_stop_take_profit" if {"high", "low"}.issubset(df.columns) else "close_only_fixed_horizon"
         self._prices_by_asset = {asset: g.sort_values("timestamp").reset_index(drop=True) for asset, g in df.groupby("asset")}
 
         for row in df.itertuples(index=False):
