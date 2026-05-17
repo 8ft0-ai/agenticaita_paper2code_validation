@@ -72,7 +72,8 @@ class PipelineSimulator:
 
     def _future_rows(self, asset: str, timestamp: pd.Timestamp) -> pd.DataFrame:
         asset_df = self._prices_by_asset[asset]
-        return asset_df[asset_df["timestamp"] > timestamp].head(self.config.exit_horizon_minutes)
+        start = asset_df["timestamp"].searchsorted(timestamp, side="right")
+        return asset_df.iloc[start : start + self.config.exit_horizon_minutes]
 
     def _close_only_exit(self, asset: str, timestamp: pd.Timestamp, fallback: float) -> ExitResult:
         future = self._future_rows(asset, timestamp)

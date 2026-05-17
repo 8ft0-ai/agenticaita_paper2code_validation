@@ -270,7 +270,7 @@ replication/results_real_binance_subset/agenticaita_replication.sqlite
 
 ## Calibration Sweep
 
-A targeted parameter sweep was run to identify settings that better match the paper's aggregate metrics.
+A targeted parameter sweep was run to identify settings that better match the paper's aggregate metrics. The repository now includes a dedicated sweep CLI so this can be repeated without running the full report-generation path for every parameter combination.
 
 The full planned grid was initially too slow with the current row-by-row simulator, so a targeted sweep was used. The targeted sweep varied the highest-impact parameters:
 
@@ -280,6 +280,15 @@ The full planned grid was initially too slow with the current row-by-row simulat
 | `z_threshold` | 2.0, 2.25, 2.5 |
 | `confidence_gate` | 0.60, 0.65 |
 | `absolute_return_floor` | fixed at 0.003 |
+
+Command pattern:
+
+```bash
+python replication/sweep.py \
+  --config replication/config.yaml \
+  --input-csv data/binanceusdm_ohlcv_real_subset/replication_input.csv \
+  --out replication/results_calibration_sweep
+```
 
 Sweep target metrics:
 
@@ -305,8 +314,8 @@ Top sweep results:
 Generated local artefacts:
 
 ```text
-replication/results_calibration_sweep/targeted_sweep_results.csv
-replication/results_calibration_sweep/targeted_sweep_top10.md
+replication/results_calibration_sweep/calibration_sweep_results.csv
+replication/results_calibration_sweep/calibration_sweep_top10.md
 ```
 
 ## Calibrated Defaults
