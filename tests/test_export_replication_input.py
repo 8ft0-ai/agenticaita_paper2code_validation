@@ -4,7 +4,7 @@ import csv
 import sqlite3
 from pathlib import Path
 
-from scripts.export_replication_input import base_asset_from_symbol, load_replication_rows, write_replication_input
+from scripts.export_replication_input import base_asset_from_symbol, complete_symbols_from_sqlite, load_replication_rows, write_replication_input
 
 
 def create_candle_db(path: Path) -> None:
@@ -36,6 +36,34 @@ def create_candle_db(path: Path) -> None:
                 ("binanceusdm", "BTC/USDT:USDT", "5m", 0, "1970-01-01T00:00:00Z", 40, 42, 39, 41, 400),
             ],
         )
+
+
+def create_coverage_db(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE candles (
+                exchange_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                timestamp_ms INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL
+            )
+            """
+        )
+        rows = []
+        for symbol in ["ETH/USDT:USDT", "BTC/USDT:USDT", "SOL/USDT:USDT"]:
+            timestamps = [0, 60_000, 120_000]
+            if symbol == "SOL/USDT:USDT":
+                timestamps = [0, 120_000]
+            for ts in timestamps:
+                rows.append(("binanceusdm", symbol, "1m", ts, f"1970-01-01T00:{ts // 60000:02d}:00Z", 1, 2, 0.5, 1.5, 10))
+        conn.executemany("INSERT INTO candles VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 
 def test_base_asset_from_symbol_normalizes_common_perp_symbols() -> None:
@@ -108,3 +136,38 @@ def test_export_full_ohlcv_replication_input(tmp_path) -> None:
             "volume": "100.0",
         }
     ]
+
+
+def test_complete_symbols_selects_full_coverage_and_prioritizes_required_symbol(tmp_path) -> None:
+    db_path = tmp_path / "coverage.sqlite"
+    create_coverage_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        symbols = complete_symbols_from_sqlite(
+            conn,
+            exchange_id="binanceusdm",
+            timeframe="1m",
+            start_ms=0,
+            end_ms=120_000,
+            symbol_limit=2,
+            required_symbol="BTC/USDT:USDT",
+        )
+
+    assert symbols == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+
+
+def test_complete_symbols_respects_requested_symbol_filter(tmp_path) -> None:
+    db_path = tmp_path / "coverage.sqlite"
+    create_coverage_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        symbols = complete_symbols_from_sqlite(
+            conn,
+            exchange_id="binanceusdm",
+            timeframe="1m",
+            start_ms=0,
+            end_ms=120_000,
+            symbols=["SOL/USDT:USDT", "ETH/USDT:USDT"],
+        )
+
+    assert symbols == ["ETH/USDT:USDT"]

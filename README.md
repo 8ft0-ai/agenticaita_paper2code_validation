@@ -85,6 +85,15 @@ python scripts/export_replication_input.py --db data/hyperliquid_ohlcv/market_da
 python scripts/export_replication_input.py --db data/hyperliquid_ohlcv/market_data.sqlite --out data/hyperliquid_ohlcv/replication_input_ohlcv.csv --format ohlcv
 ```
 
+For a larger public-market replication universe, fetch Binance USD-M or Bybit fallback data, export only complete symbols, then run the replication harness:
+
+```bash
+python scripts/fetch_hyperliquid_ohlcv.py --exchange binanceusdm --out data/binanceusdm_ohlcv_large
+python scripts/export_replication_input.py --db data/binanceusdm_ohlcv_large/market_data.sqlite --exchange binanceusdm --format ohlcv --complete-only --start 2026-04-06T00:00:00Z --end 2026-04-11T23:59:59Z --symbol-limit 76 --required-symbol BTC/USDT:USDT --symbols-out data/binanceusdm_ohlcv_large/complete_symbols_76.txt --out data/binanceusdm_ohlcv_large/replication_input_ohlcv_76.csv
+python replication/replicate.py --config replication/config.yaml --input-csv data/binanceusdm_ohlcv_large/replication_input_ohlcv_76.csv --out replication/results_real_binance_large_76
+python scripts/compare_replication_runs.py --baseline replication/results_real_binance_calibrated/summary.json --candidate replication/results_real_binance_large_76/summary.json --out docs/replication_large_universe_comparison.md
+```
+
 Failures are recorded per symbol in `manifest.json`; one symbol failure does not abort the rest of the run.
 
 If Hyperliquid historical coverage is incomplete, rerun with explicit subsets to isolate missing markets, then use CCXT-compatible fallback venues only for comparable public market-condition checks:
