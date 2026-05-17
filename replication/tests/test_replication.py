@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +13,104 @@ from src.agenticaita.cbd import CBDInputs, cbd_score, z_tilde
 from src.agenticaita.contracts import AnalystDecision
 from src.agenticaita.risk import DeterministicRiskManager, RiskConfig
 from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig
+
+
+def test_replication_metadata_helpers_include_config_and_data_fields() -> None:
+    pd = pytest.importorskip("pandas")
+
+    from replicate import build_config_metadata, build_data_metadata
+
+    cfg = {
+        "experiment": {"name": "test", "mode": "dry_run", "seed": 7, "output_dir": "results"},
+        "azte": {"polling_interval_seconds": 60, "rolling_window": 30, "z_threshold": 2.0, "absolute_return_floor": 0.003},
+        "igp": {"global_cooldown_seconds": 3000, "per_asset_cooldown_seconds": 300},
+        "risk": {"confidence_gate": 0.65, "max_stop_loss_fraction": 0.02, "max_position_size_usd": 500, "base_position_size_usd": 188},
+        "cbd": {"alpha": 0.5, "kappa": 0.5, "benchmark_asset": "BTC"},
+        "cost_scenarios": {"zero_cost": 0.0, "realistic": 0.001},
+        "synthetic_data": {"assets": ["BTC"], "minutes": 10},
+    }
+    data = pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-04-06T00:00:00Z",
+                "asset": "BTC",
+                "exchange_id": "binanceusdm",
+                "source_symbol": "BTC/USDT:USDT",
+                "timeframe": "1m",
+                "close": 100.0,
+            },
+            {
+                "timestamp": "2026-04-06T00:01:00Z",
+                "asset": "ETH",
+                "exchange_id": "binanceusdm",
+                "source_symbol": "ETH/USDT:USDT",
+                "timeframe": "1m",
+                "close": 10.0,
+            },
+        ]
+    )
+    data["timestamp"] = pd.to_datetime(data["timestamp"], utc=True)
+
+    config_metadata = build_config_metadata(cfg)
+    data_metadata = build_data_metadata(data, "input.csv")
+
+    assert config_metadata["azte"]["rolling_window"] == 30
+    assert config_metadata["igp"]["global_cooldown_seconds"] == 3000
+    assert config_metadata["risk"]["confidence_gate"] == 0.65
+    assert config_metadata["cbd"]["benchmark_asset"] == "BTC"
+    assert config_metadata["cost_scenarios"]["realistic"] == 0.001
+    assert data_metadata["data_source"] == "input.csv"
+    assert data_metadata["candle_count"] == 2
+    assert data_metadata["asset_count"] == 2
+    assert data_metadata["assets"] == ["BTC", "ETH"]
+    assert data_metadata["per_asset_candle_counts"] == {"BTC": 1, "ETH": 1}
+    assert data_metadata["exchange_ids"] == ["binanceusdm"]
+    assert data_metadata["source_symbols"] == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+    assert data_metadata["timeframes"] == ["1m"]
+
+
+def test_replicate_outputs_run_metadata(tmp_path) -> None:
+    pd = pytest.importorskip("pandas")
+
+    replication_root = Path(__file__).resolve().parents[1]
+    input_csv = tmp_path / "input.csv"
+    out_dir = tmp_path / "results"
+    timestamps = pd.date_range("2026-04-06", periods=45, freq="min", tz="UTC")
+    rows = []
+    for index, timestamp in enumerate(timestamps):
+        close = 100.0 if index < 35 else 105.0 + (index - 35) * 0.1
+        rows.append(
+            {
+                "timestamp": timestamp.isoformat(),
+                "asset": "BTC",
+                "exchange_id": "binanceusdm",
+                "source_symbol": "BTC/USDT:USDT",
+                "timeframe": "1m",
+                "close": close,
+            }
+        )
+    pd.DataFrame(rows).to_csv(input_csv, index=False)
+
+    subprocess.run(
+        [sys.executable, "replicate.py", "--config", "config.yaml", "--input-csv", str(input_csv), "--out", str(out_dir)],
+        cwd=replication_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    report = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+    markdown = (out_dir / "replication_report.md").read_text(encoding="utf-8")
+
+    assert report["metadata"]["data"]["data_source"] == str(input_csv)
+    assert report["metadata"]["data"]["candle_count"] == 45
+    assert report["metadata"]["data"]["exchange_ids"] == ["binanceusdm"]
+    assert report["metadata"]["config"]["azte"]["rolling_window"] == 30
+    assert report["metadata"]["config"]["igp"]["global_cooldown_seconds"] == 3000
+    assert report["metadata"]["config"]["risk"]["confidence_gate"] == 0.65
+    assert report["metadata"]["execution"]["execution_model"] == "close_only_fixed_horizon"
+    assert "git_commit_sha" in report["metadata"]
+    assert "## Run Metadata" in markdown
 
 
 def test_load_ohlcv_csv_accepts_close_only(tmp_path) -> None:

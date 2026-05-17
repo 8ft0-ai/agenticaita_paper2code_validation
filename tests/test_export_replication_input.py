@@ -57,8 +57,22 @@ def test_export_close_only_replication_input(tmp_path) -> None:
         output = list(csv.DictReader(handle))
 
     assert output == [
-        {"timestamp": "1970-01-01T00:00:00Z", "asset": "BTC", "close": "21.0"},
-        {"timestamp": "1970-01-01T00:01:00Z", "asset": "ETH", "close": "11.0"},
+        {
+            "timestamp": "1970-01-01T00:00:00Z",
+            "asset": "BTC",
+            "exchange_id": "binanceusdm",
+            "source_symbol": "BTC/USDT:USDT",
+            "timeframe": "1m",
+            "close": "21.0",
+        },
+        {
+            "timestamp": "1970-01-01T00:01:00Z",
+            "asset": "ETH",
+            "exchange_id": "binanceusdm",
+            "source_symbol": "ETH/USDT:USDT",
+            "timeframe": "1m",
+            "close": "11.0",
+        },
     ]
 
 
@@ -84,6 +98,9 @@ def test_export_full_ohlcv_replication_input(tmp_path) -> None:
         {
             "timestamp": "1970-01-01T00:01:00Z",
             "asset": "ETH",
+            "exchange_id": "binanceusdm",
+            "source_symbol": "ETH/USDT:USDT",
+            "timeframe": "1m",
             "open": "10.0",
             "high": "12.0",
             "low": "9.0",

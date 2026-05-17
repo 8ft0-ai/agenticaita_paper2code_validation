@@ -9,8 +9,9 @@ import sys
 from pathlib import Path
 
 
-CLOSE_COLUMNS = ("timestamp", "asset", "close")
-OHLCV_COLUMNS = ("timestamp", "asset", "open", "high", "low", "close", "volume")
+PROVENANCE_COLUMNS = ("exchange_id", "source_symbol", "timeframe")
+CLOSE_COLUMNS = ("timestamp", "asset", *PROVENANCE_COLUMNS, "close")
+OHLCV_COLUMNS = ("timestamp", "asset", *PROVENANCE_COLUMNS, "open", "high", "low", "close", "volume")
 
 
 def base_asset_from_symbol(symbol: str) -> str:
@@ -33,7 +34,7 @@ def load_replication_rows(
     full_ohlcv: bool = False,
 ) -> list[dict[str, str | float]]:
     query = [
-        "SELECT timestamp, symbol, open, high, low, close, volume",
+        "SELECT timestamp, exchange_id, symbol, timeframe, open, high, low, close, volume",
         "FROM candles",
         "WHERE timeframe = ?",
     ]
@@ -48,10 +49,13 @@ def load_replication_rows(
     query.append("ORDER BY timestamp_ms, symbol")
 
     rows: list[dict[str, str | float]] = []
-    for timestamp, symbol, open_, high, low, close, volume in conn.execute(" ".join(query), params):
+    for timestamp, row_exchange_id, symbol, row_timeframe, open_, high, low, close, volume in conn.execute(" ".join(query), params):
         row: dict[str, str | float] = {
             "timestamp": str(timestamp),
             "asset": base_asset_from_symbol(str(symbol)),
+            "exchange_id": str(row_exchange_id),
+            "source_symbol": str(symbol),
+            "timeframe": str(row_timeframe),
             "close": float(close),
         }
         if full_ohlcv:

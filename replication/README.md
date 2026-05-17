@@ -44,6 +44,8 @@ python scripts/export_replication_input.py --db data/binanceusdm_ohlcv/market_da
 python scripts/export_replication_input.py --db data/binanceusdm_ohlcv/market_data.sqlite --out data/binanceusdm_ohlcv/replication_input_ohlcv.csv --format ohlcv
 ```
 
+Exports include provenance columns such as `exchange_id`, `source_symbol`, and `timeframe` so generated `summary.json` and `replication_report.md` can report exchange and symbol coverage.
+
 ## Outputs
 
 - `results/agenticaita_replication.sqlite`
@@ -52,6 +54,8 @@ python scripts/export_replication_input.py --db data/binanceusdm_ohlcv/market_da
 - `results/vol_history.csv`
 - `results/summary.json`
 - `results/replication_report.md`
+
+`summary.json` includes a `metadata` block with the data source, candle and asset counts, per-asset coverage, config values, execution mode, and git commit SHA when available. The Markdown report includes the same information under `Run Metadata`.
 
 ## What this adds beyond the earlier claim audit
 
