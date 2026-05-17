@@ -186,13 +186,19 @@ data/binanceusdm_ohlcv_real_subset/market_data.sqlite
 
 ## Replication Input Preparation
 
-The replication harness currently accepts a CSV with the columns:
+The replication harness accepts a close-only CSV with the columns:
 
 ```text
 timestamp,asset,close
 ```
 
-The Binance candle database was converted into this format. Symbols were normalized to base assets so that the harness's configured benchmark asset `BTC` would match the BTC rows.
+It also accepts a fuller OHLCV CSV with the columns:
+
+```text
+timestamp,asset,open,high,low,close,volume
+```
+
+The Binance candle database was converted into the close-only format for the runs in this report. Symbols were normalized to base assets so that the harness's configured benchmark asset `BTC` would match the BTC rows.
 
 Output:
 
@@ -206,7 +212,7 @@ Rows:
 129,600
 ```
 
-This is close-only input. The harness does not yet use `open`, `high`, `low`, or `volume`, which is an important limitation for stop-loss and take-profit simulation.
+The dedicated export helper can now emit either close-only or full-OHLCV input. The calibrated runs in this report used close-only input, and the simulator still uses close prices for execution until the OHLC stop-loss/take-profit issue is implemented.
 
 ## Initial Real-Data Replication Run
 

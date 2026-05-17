@@ -78,6 +78,13 @@ python scripts/fetch_hyperliquid_ohlcv.py --max-retries 5 --retry-sleep 3 --limi
 python scripts/fetch_hyperliquid_ohlcv.py --funding-limit 1000
 ```
 
+Convert a downloaded SQLite candle store into replication-harness input:
+
+```bash
+python scripts/export_replication_input.py --db data/hyperliquid_ohlcv/market_data.sqlite --out data/hyperliquid_ohlcv/replication_input.csv
+python scripts/export_replication_input.py --db data/hyperliquid_ohlcv/market_data.sqlite --out data/hyperliquid_ohlcv/replication_input_ohlcv.csv --format ohlcv
+```
+
 Failures are recorded per symbol in `manifest.json`; one symbol failure does not abort the rest of the run.
 
 If Hyperliquid historical coverage is incomplete, rerun with explicit subsets to isolate missing markets, then use CCXT-compatible fallback venues only for comparable public market-condition checks:

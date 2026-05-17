@@ -10,6 +10,56 @@ from src.agenticaita.contracts import AnalystDecision
 from src.agenticaita.risk import DeterministicRiskManager, RiskConfig
 
 
+def test_load_ohlcv_csv_accepts_close_only(tmp_path) -> None:
+    pd = pytest.importorskip("pandas")
+
+    from src.agenticaita.data import load_ohlcv_csv
+
+    path = tmp_path / "close_only.csv"
+    pd.DataFrame(
+        [
+            {"timestamp": "2026-04-06T00:01:00Z", "asset": "ETH", "close": "2000.5"},
+            {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": "70000.1"},
+        ]
+    ).to_csv(path, index=False)
+
+    df = load_ohlcv_csv(path)
+
+    assert df.columns.tolist() == ["timestamp", "asset", "close"]
+    assert df["asset"].tolist() == ["BTC", "ETH"]
+    assert df["close"].tolist() == [70000.1, 2000.5]
+    assert str(df["timestamp"].dt.tz) == "UTC"
+
+
+def test_load_ohlcv_csv_preserves_and_casts_full_ohlcv(tmp_path) -> None:
+    pd = pytest.importorskip("pandas")
+
+    from src.agenticaita.data import load_ohlcv_csv
+
+    path = tmp_path / "full_ohlcv.csv"
+    pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-04-06T00:00:00Z",
+                "asset": "BTC",
+                "open": "70000.0",
+                "high": "70100.0",
+                "low": "69950.0",
+                "close": "70025.0",
+                "volume": "123.4",
+                "source_symbol": "BTC/USDT:USDT",
+            }
+        ]
+    ).to_csv(path, index=False)
+
+    df = load_ohlcv_csv(path)
+
+    assert {"open", "high", "low", "close", "volume", "source_symbol"}.issubset(df.columns)
+    for column in ["open", "high", "low", "close", "volume"]:
+        assert pd.api.types.is_float_dtype(df[column])
+    assert df.loc[0, "source_symbol"] == "BTC/USDT:USDT"
+
+
 def test_azte_abs_return_floor_triggers_after_warmup() -> None:
     azte = AdaptiveZScoreTriggerEngine(window=3, z_threshold=99.0, absolute_return_floor=0.003)
     prices = [100.0, 100.01, 100.02, 100.03, 100.50]
