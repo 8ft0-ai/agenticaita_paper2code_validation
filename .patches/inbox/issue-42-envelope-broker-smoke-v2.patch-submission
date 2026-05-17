@@ -1,0 +1,32 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 42,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-42-envelope-broker-smoke-v2",
+  "commit_message": "Add envelope broker smoke-test document",
+  "pr_title": "Smoke test single-file envelope broker",
+  "pr_body": "Addresses #42\n\nAddresses 8ft0-ai/chatgpt-github-devops#50\n\n## Summary\n\nAdds a small documentation file to validate the newly bootstrapped single-file `.patch-submission` envelope broker.\n\n## Validation\n\n- Submitted as one `.patch-submission` file to the `patch-submissions` branch.\n- Expected broker validation: `git apply --check`.",
+  "validation": [
+    "Docs-only smoke test",
+    "Submitted as one .patch-submission envelope",
+    "Expected broker validation: git apply --check"
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/envelope-broker-smoke-test.md b/docs/envelope-broker-smoke-test.md
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/docs/envelope-broker-smoke-test.md
+@@ -0,0 +1,7 @@
++# Envelope broker smoke test
++
++This file was created by a single-file `.patch-submission` broker smoke test.
++
++The expected result is a generated implementation pull request and a processed archive entry.
++
++Issue: #42
