@@ -1,0 +1,17 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add envelope broker smoke-test v4 document",
+  "implementation_branch": "ai/issue-42-envelope-broker-smoke-v4",
+  "issue_number": 42,
+  "pr_body": "Addresses #42\n\nAddresses 8ft0-ai/chatgpt-github-devops#50\n\n## Summary\n\nAdds a fresh documentation smoke-test file to validate that the single-file `.patch-submission` envelope broker can create a PR and processed archive using `PATCH_BOT_TOKEN`.\n\n## Validation\n\n- Submitted as one `.patch-submission` file to the `patch-submissions` branch.\n- Expected broker validation: `git apply --check`.\n- Expected broker outcome: PR created by workflow and submission archived as processed.",
+  "pr_title": "Smoke test single-file envelope broker v4",
+  "schema_version": "2",
+  "validation": [
+    "Docs-only smoke test v4",
+    "Submitted as one .patch-submission envelope",
+    "Expected broker validation: git apply --check",
+    "PATCH_BOT_TOKEN configured before retry"
+  ]
+}
