@@ -219,3 +219,7 @@ __marimo__/
 
 # Downloaded market data artifacts
 data/hyperliquid_ohlcv*/
+data/binanceusdm_ohlcv*/
+data/bybit_ohlcv*/
+replication/results_real_*/
+replication/results_calibration_sweep*/

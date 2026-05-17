@@ -46,6 +46,18 @@ python scripts/export_replication_input.py --db data/binanceusdm_ohlcv/market_da
 
 Exports include provenance columns such as `exchange_id`, `source_symbol`, and `timeframe` so generated `summary.json` and `replication_report.md` can report exchange and symbol coverage.
 
+To build a larger complete-symbol universe, add `--complete-only` with the target window and optional `--symbol-limit`:
+
+```bash
+python ../scripts/export_replication_input.py --db ../data/binanceusdm_ohlcv_large/market_data.sqlite --exchange binanceusdm --format ohlcv --complete-only --start 2026-04-06T00:00:00Z --end 2026-04-11T23:59:59Z --symbol-limit 76 --required-symbol BTC/USDT:USDT --symbols-out ../data/binanceusdm_ohlcv_large/complete_symbols_76.txt --out ../data/binanceusdm_ohlcv_large/replication_input_ohlcv_76.csv
+```
+
+Compare a baseline run against a larger-universe run from the repository root:
+
+```bash
+python scripts/compare_replication_runs.py --baseline replication/results_real_binance_calibrated/summary.json --candidate replication/results_real_binance_large_76/summary.json --out docs/replication_large_universe_comparison.md
+```
+
 ## Calibration Sweep
 
 Use `sweep.py` to run an in-process calibration grid without writing per-run audit databases:

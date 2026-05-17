@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -24,6 +26,59 @@ def parse_symbols(value: str | None) -> list[str] | None:
         return None
     symbols = [item.strip() for item in value.split(",") if item.strip()]
     return symbols or None
+
+
+def parse_utc_ms(value: str) -> int:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.astimezone(timezone.utc).timestamp() * 1000)
+
+
+def timeframe_to_ms(timeframe: str) -> int:
+    match = re.fullmatch(r"(\d+)([mhd])", timeframe)
+    if not match:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    amount = int(match.group(1))
+    unit = match.group(2)
+    return amount * {"m": 60_000, "h": 3_600_000, "d": 86_400_000}[unit]
+
+
+def complete_symbols_from_sqlite(
+    conn: sqlite3.Connection,
+    exchange_id: str,
+    timeframe: str,
+    start_ms: int,
+    end_ms: int,
+    symbol_limit: int | None = None,
+    required_symbol: str | None = None,
+    symbols: list[str] | None = None,
+) -> list[str]:
+    timeframe_ms = timeframe_to_ms(timeframe)
+    expected_count = ((end_ms - start_ms) // timeframe_ms) + 1
+    query = [
+        "SELECT symbol",
+        "FROM candles",
+        "WHERE exchange_id = ? AND timeframe = ? AND timestamp_ms BETWEEN ? AND ?",
+    ]
+    params: list[str | int] = [exchange_id, timeframe, start_ms, end_ms]
+    if symbols:
+        placeholders = ",".join("?" for _ in symbols)
+        query.append(f"AND symbol IN ({placeholders})")
+        params.extend(symbols)
+    query.extend([
+        "GROUP BY symbol",
+        "HAVING COUNT(*) = ?",
+        "AND COUNT(DISTINCT timestamp_ms) = ?",
+        "AND MIN(timestamp_ms) = ?",
+        "AND MAX(timestamp_ms) = ?",
+    ])
+    params.extend([expected_count, expected_count, start_ms, start_ms + (expected_count - 1) * timeframe_ms])
+    complete = [row[0] for row in conn.execute(" ".join(query), params)]
+    complete = sorted(complete, key=lambda symbol: (0 if symbol == required_symbol else 1, symbol))
+    if symbol_limit is not None:
+        complete = complete[:symbol_limit]
+    return complete
 
 
 def load_replication_rows(
@@ -77,15 +132,35 @@ def write_replication_input(rows: list[dict[str, str | float]], path: str | Path
 def run_export(args: argparse.Namespace) -> dict[str, int | str]:
     full_ohlcv = args.format == "ohlcv"
     with sqlite3.connect(args.db) as conn:
+        symbols = parse_symbols(args.symbols)
+        if args.complete_only:
+            if not args.exchange:
+                raise ValueError("--complete-only requires --exchange")
+            if not args.start or not args.end:
+                raise ValueError("--complete-only requires --start and --end")
+            symbols = complete_symbols_from_sqlite(
+                conn,
+                exchange_id=args.exchange,
+                timeframe=args.timeframe,
+                start_ms=parse_utc_ms(args.start),
+                end_ms=parse_utc_ms(args.end),
+                symbol_limit=args.symbol_limit,
+                required_symbol=args.required_symbol,
+                symbols=symbols,
+            )
         rows = load_replication_rows(
             conn,
             exchange_id=args.exchange,
             timeframe=args.timeframe,
-            symbols=parse_symbols(args.symbols),
+            symbols=symbols,
             full_ohlcv=full_ohlcv,
         )
+    if args.symbols_out:
+        symbols_path = Path(args.symbols_out)
+        symbols_path.parent.mkdir(parents=True, exist_ok=True)
+        symbols_path.write_text("\n".join(symbols or []) + ("\n" if symbols else ""), encoding="utf-8")
     write_replication_input(rows, args.out, full_ohlcv=full_ohlcv)
-    return {"rows": len(rows), "output": str(args.out), "format": args.format}
+    return {"rows": len(rows), "symbols": len(symbols or []), "output": str(args.out), "format": args.format}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -96,13 +171,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeframe", default="1m", help="candle timeframe to export; defaults to 1m")
     parser.add_argument("--symbols", default=None, help="optional comma-separated exchange symbols to export")
     parser.add_argument("--format", choices=("close", "ohlcv"), default="close", help="output columns; defaults to close-only compatibility")
+    parser.add_argument("--complete-only", action="store_true", help="export only symbols with complete candle coverage for --start/--end")
+    parser.add_argument("--start", default=None, help="inclusive UTC start timestamp for --complete-only")
+    parser.add_argument("--end", default=None, help="inclusive UTC end timestamp for --complete-only")
+    parser.add_argument("--symbol-limit", type=int, default=None, help="maximum number of complete symbols to export")
+    parser.add_argument("--required-symbol", default=None, help="complete symbol to prioritize before applying --symbol-limit")
+    parser.add_argument("--symbols-out", default=None, help="optional path to write selected complete symbols")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     result = run_export(args)
-    print(f"wrote {result['rows']} rows to {result['output']} using {result['format']} format", flush=True)
+    print(f"wrote {result['rows']} rows across {result['symbols']} selected symbols to {result['output']} using {result['format']} format", flush=True)
     return 0
 
 

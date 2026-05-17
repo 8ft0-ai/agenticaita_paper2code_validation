@@ -531,3 +531,16 @@ Recommended order:
 3. Run a larger all-active-symbol Binance or Bybit fallback universe to test whether counts remain stable outside the 15-symbol subset.
 4. If Hyperliquid OHLCV becomes available, rerun the calibrated harness on the preferred venue.
 5. Keep the report language explicit: these runs are functional architecture replications, not empirical reproductions of the original five-day dry-run.
+
+## Larger-Universe Follow-Up Procedure
+
+The 15-symbol baseline is intentionally small. To test whether calibrated behavior remains stable over a larger public perpetual universe, fetch a broader fallback venue dataset, export only complete symbols, run replication, and compare the summaries:
+
+```bash
+python scripts/fetch_hyperliquid_ohlcv.py --exchange binanceusdm --out data/binanceusdm_ohlcv_large
+python scripts/export_replication_input.py --db data/binanceusdm_ohlcv_large/market_data.sqlite --exchange binanceusdm --format ohlcv --complete-only --start 2026-04-06T00:00:00Z --end 2026-04-11T23:59:59Z --symbol-limit 76 --required-symbol BTC/USDT:USDT --symbols-out data/binanceusdm_ohlcv_large/complete_symbols_76.txt --out data/binanceusdm_ohlcv_large/replication_input_ohlcv_76.csv
+python replication/replicate.py --config replication/config.yaml --input-csv data/binanceusdm_ohlcv_large/replication_input_ohlcv_76.csv --out replication/results_real_binance_large_76
+python scripts/compare_replication_runs.py --baseline replication/results_real_binance_calibrated/summary.json --candidate replication/results_real_binance_large_76/summary.json --out docs/replication_large_universe_comparison.md
+```
+
+The complete-symbol export excludes symbols with missing candles, can cap the universe at 76 symbols, and prioritizes the BTC benchmark symbol before applying the cap. Generated data and large run outputs remain gitignored.
