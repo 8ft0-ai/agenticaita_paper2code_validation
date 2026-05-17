@@ -1,0 +1,13 @@
+diff --git a/docs/envelope-broker-smoke-test.md b/docs/envelope-broker-smoke-test.md
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/docs/envelope-broker-smoke-test.md
+@@ -0,0 +1,7 @@
++# Envelope broker smoke test
++
++This file was created by a single-file `.patch-submission` broker smoke test.
++
++The expected result is a generated implementation pull request and a processed archive entry.
++
++Issue: #42
