@@ -1,0 +1,260 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 31,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-31-replication-quality-checks",
+  "commit_message": "Add replication quality checks",
+  "pr_title": "Add replication output quality checks",
+  "pr_body": "Closes #31\n\n## Summary\n\nAdds explicit quality checks to the replication CLI so malformed real-data inputs and empty real-data outputs fail before results are interpreted.\n\n## Changes\n\n- Validates non-empty OHLCV input, required input columns, and duplicate `(timestamp, asset)` rows.\n- Validates required pipeline-log and trades columns when outputs are present.\n- Fails real-data runs with an empty pipeline log and warns when no trades are produced.\n- Records quality-check status in `summary.json` and verifies the Markdown report is written.\n- Adds tests for invalid input, real-data output failure, empty-trades warnings, and successful real-data-style quality checks.\n\n## Validation\n\n- Prepared unified diff against current `main`; broker-side `git apply --check` validates the submitted patch.\n- Static review of changed Python and tests.\n- Full market-data fetch and replication runs were not executed because they require live public exchange API access and generate ignored artefacts.",
+  "validation": [
+    "Prepared unified diff against current main (6b7407fbc398273713ac4e150fed0218c1540ede); broker-side git apply --check validates the submitted patch.",
+    "Static review of changed Python and tests.",
+    "Full market-data fetch and replication runs skipped because they require live public exchange API access and generate ignored artefacts."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/replication/replicate.py b/replication/replicate.py
+index 7968cb6..ef2441a 100644
+--- a/replication/replicate.py
++++ b/replication/replicate.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ import argparse
+ import json
+ import subprocess
++import sys
+ from pathlib import Path
+ 
+ import pandas as pd
+@@ -13,6 +14,20 @@ from src.agenticaita.risk import RiskConfig
+ from src.agenticaita.agents import AnalystConfig
+ from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_sqlite
+ 
++REQUIRED_OHLCV_COLUMNS = ("timestamp", "asset", "close")
++REQUIRED_PIPELINE_LOG_COLUMNS = ("timestamp", "asset", "event")
++REQUIRED_TRADES_COLUMNS = ("timestamp", "asset", "signal", "net_pnl_usd")
++
++
++class QualityCheckError(ValueError):
++    """Raised when replication inputs or outputs are unsafe to interpret."""
++
++
++def missing_columns(df: pd.DataFrame, required: tuple[str, ...]) -> list[str]:
++    """Return required columns that are absent from a dataframe."""
++    return sorted(set(required) - set(df.columns))
++
+ 
+ def load_config(path: Path) -> dict:
+     return yaml.safe_load(path.read_text(encoding="utf-8"))
+@@ -79,6 +94,66 @@ def build_data_metadata(ohlcv: pd.DataFrame, data_source: str) -> dict:
+         metadata["end_timestamp"] = str(ohlcv["timestamp"].max())
+     return metadata
+ 
++
++def is_real_data_run(data_source: str) -> bool:
++    """Return True for runs backed by a user-supplied market-data CSV."""
++    return data_source != "deterministic_synthetic"
++
++
++def validate_ohlcv_input(ohlcv: pd.DataFrame, data_source: str) -> dict:
++    """Validate OHLCV input before running the replication harness."""
++    errors: list[str] = []
++    missing = missing_columns(ohlcv, REQUIRED_OHLCV_COLUMNS)
++    duplicate_count = 0
++
++    if ohlcv.empty:
++        errors.append("OHLCV input is empty")
++    if missing:
++        errors.append(f"OHLCV input missing required columns: {missing}")
++    if not missing and not ohlcv.empty:
++        duplicate_count = int(ohlcv.duplicated(subset=["timestamp", "asset"]).sum())
++        if duplicate_count:
++            errors.append(f"OHLCV input contains {duplicate_count} duplicate (timestamp, asset) rows")
++
++    if errors:
++        raise QualityCheckError("; ".join(errors))
++
++    return {
++        "status": "pass",
++        "data_source": data_source,
++        "rows": int(len(ohlcv)),
++        "columns_checked": list(REQUIRED_OHLCV_COLUMNS),
++        "duplicate_timestamp_asset_rows": duplicate_count,
++    }
++
++
++def validate_replication_outputs(
++    pipeline_log: pd.DataFrame,
++    trades: pd.DataFrame,
++    *,
++    real_data_run: bool,
++) -> dict:
++    """Validate generated replication outputs before writing interpretive reports."""
++    errors: list[str] = []
++    warnings: list[str] = []
++
++    if real_data_run and pipeline_log.empty:
++        errors.append("pipeline_log is empty for real-data run")
++    if not pipeline_log.empty:
++        missing_log = missing_columns(pipeline_log, REQUIRED_PIPELINE_LOG_COLUMNS)
++        if missing_log:
++            errors.append(f"pipeline_log missing required columns: {missing_log}")
++    if trades.empty:
++        warnings.append("trades output is empty; no executed trades were produced")
++    else:
++        missing_trades = missing_columns(trades, REQUIRED_TRADES_COLUMNS)
++        if missing_trades:
++            errors.append(f"trades output missing required columns: {missing_trades}")
++
++    if errors:
++        raise QualityCheckError("; ".join(errors))
++
++    return {"status": "pass", "real_data_run": real_data_run, "warnings": warnings}
++
++
++def validate_report_written(path: Path) -> dict:
++    if not path.exists() or path.stat().st_size == 0:
++        raise QualityCheckError(f"replication report was not written: {path}")
++    return {"status": "pass", "path": str(path)}
++
+ 
+ def main() -> None:
+     parser = argparse.ArgumentParser()
+@@ -108,6 +183,8 @@ def main() -> None:
+         )
+         data_source = "deterministic_synthetic"
+ 
++    input_quality = validate_ohlcv_input(ohlcv, data_source)
++
+     sim_cfg = SimulatorConfig(
+         rolling_window=int(cfg["azte"]["rolling_window"]),
+         z_threshold=float(cfg["azte"]["z_threshold"]),
+@@ -129,6 +206,9 @@ def main() -> None:
+     simulator = PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg)
+     pipeline_log, trades, vol_history = simulator.run(ohlcv)
+     summary = summarise(pipeline_log, trades)
++    output_quality = validate_replication_outputs(pipeline_log, trades, real_data_run=is_real_data_run(data_source))
++    for warning in output_quality["warnings"]:
++        print(f"replication quality warning: {warning}", file=sys.stderr)
+ 
+     ohlcv.to_csv(out_dir / "ohlcv_used.csv", index=False)
+     pipeline_log.to_csv(out_dir / "pipeline_log.csv", index=False)
+@@ -163,9 +243,12 @@ def main() -> None:
+         "transaction_cost_sensitivity": costs,
+         "caveat": "Synthetic data and deterministic proxy agents do not validate the paper's live-market claims.",
+     }
+-    (out_dir / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
++    report["quality_checks"] = {
++        "input": input_quality,
++        "outputs": output_quality,
++    }
+     md = [
+         "# AGENTICAITA functional replication run",
+         "",
+@@ -211,10 +294,15 @@ def main() -> None:
+         "",
+         pd.DataFrame(costs).to_markdown(index=False),
+     ]
+-    (out_dir / "replication_report.md").write_text("\n".join(md), encoding="utf-8")
++    report_path = out_dir / "replication_report.md"
++    report_path.write_text("\n".join(md), encoding="utf-8")
++    report["quality_checks"]["outputs"]["report_generation"] = validate_report_written(report_path)
++    (out_dir / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+     print(json.dumps(report["summary"], indent=2))
+ 
+ 
+ if __name__ == "__main__":
+-    main()
++    try:
++        main()
++    except QualityCheckError as exc:
++        raise SystemExit(f"replication quality check failed: {exc}") from exc
+diff --git a/replication/tests/test_replication_quality.py b/replication/tests/test_replication_quality.py
+new file mode 100644
+index 0000000..e5b9e71
+--- /dev/null
++++ b/replication/tests/test_replication_quality.py
+@@ -0,0 +1,88 @@
++from __future__ import annotations
++
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++
++def test_validate_ohlcv_input_rejects_duplicate_timestamp_asset() -> None:
++    pd = pytest.importorskip("pandas")
++    from replicate import QualityCheckError, validate_ohlcv_input
++
++    frame = pd.DataFrame(
++        [
++            {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 100.0},
++            {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 101.0},
++        ]
++    )
++    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
++
++    with pytest.raises(QualityCheckError, match="duplicate"):
++        validate_ohlcv_input(frame, "input.csv")
++
++
++def test_validate_replication_outputs_rejects_empty_real_data_pipeline_log() -> None:
++    pd = pytest.importorskip("pandas")
++    from replicate import QualityCheckError, validate_replication_outputs
++
++    with pytest.raises(QualityCheckError, match="pipeline_log is empty"):
++        validate_replication_outputs(pd.DataFrame(), pd.DataFrame(), real_data_run=True)
++
++
++def test_validate_replication_outputs_warns_when_trades_empty() -> None:
++    pd = pytest.importorskip("pandas")
++    from replicate import validate_replication_outputs
++
++    pipeline_log = pd.DataFrame([{"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "event": "trigger"}])
++
++    result = validate_replication_outputs(pipeline_log, pd.DataFrame(), real_data_run=True)
++
++    assert result["status"] == "pass"
++    assert result["warnings"] == ["trades output is empty; no executed trades were produced"]
++
++
++def test_validate_replication_outputs_accepts_successful_real_data_style_outputs() -> None:
++    pd = pytest.importorskip("pandas")
++    from replicate import validate_ohlcv_input, validate_replication_outputs
++
++    ohlcv = pd.DataFrame([{"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 100.0}])
++    pipeline_log = pd.DataFrame([{"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "event": "trigger"}])
++    trades = pd.DataFrame([{"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "signal": "long", "net_pnl_usd": 1.0}])
++
++    assert validate_ohlcv_input(ohlcv, "input.csv")["status"] == "pass"
++    assert validate_replication_outputs(pipeline_log, trades, real_data_run=True)["status"] == "pass"
++
++
++def test_replicate_cli_exits_clearly_for_duplicate_input(tmp_path: Path) -> None:
++    pd = pytest.importorskip("pandas")
++
++    replication_root = Path(__file__).resolve().parents[1]
++    input_csv = tmp_path / "duplicate_input.csv"
++    out_dir = tmp_path / "results"
++    pd.DataFrame(
++        [
++            {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 100.0},
++            {"timestamp": "2026-04-06T00:00:00Z", "asset": "BTC", "close": 101.0},
++        ]
++    ).to_csv(input_csv, index=False)
++
++    result = subprocess.run(
++        [sys.executable, "replicate.py", "--config", "config.yaml", "--input-csv", str(input_csv), "--out", str(out_dir)],
++        cwd=replication_root,
++        capture_output=True,
++        text=True,
++    )
++
++    assert result.returncode != 0
++    assert "replication quality check failed" in result.stderr
++    assert "duplicate (timestamp, asset)" in result.stderr
