@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add real-data replication workflow script",
+  "implementation_branch": "ai/issue-30-real-data-workflow-script-v2",
+  "issue_number": 30,
+  "pr_body": "Closes #30\n\n## Summary\n\nAdds a single scripted entry point and runbook for the public-market real-data replication workflow.\n\n## Changes\n\n- Adds `scripts/run_real_data_replication.py` to orchestrate market-data fetch, SQLite-to-replication CSV export, and replication harness execution.\n- Supports the 15-symbol baseline subset by default and a larger complete-symbol universe via `--profile large`.\n- Adds a skip-fetch/skip-replication smoke test that creates a temporary SQLite candle store and verifies the input-conversion path.\n- Adds `docs/real_data_replication_workflow.md` documenting dependencies, runtime expectations, baseline and large-universe commands, and smoke-test usage.\n\n## Validation\n\n- Prepared v2 unified diff as new-file-only patch against current `main`; broker-side `git apply --check` validates the submitted patch.\n- `python -m py_compile scripts/run_real_data_replication.py replication/tests/test_real_data_workflow.py` on reconstructed new-file content.\n- Full market-data fetch and replication runs were not executed because they require live public exchange API access and can generate large ignored artefacts.",
+  "pr_title": "Create reproducible real-data replication command script",
+  "schema_version": "2",
+  "validation": [
+    "Prepared v2 unified diff as new-file-only patch against current main (05a42653655f44cd1683605747353f76b971661c); broker-side git apply --check validates the submitted patch.",
+    "python -m py_compile scripts/run_real_data_replication.py replication/tests/test_real_data_workflow.py on reconstructed new-file content.",
+    "Full market-data fetch and replication runs skipped because they require live public exchange API access and generate ignored artefacts."
+  ]
+}
