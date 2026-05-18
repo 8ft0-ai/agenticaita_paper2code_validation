@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add replication quality check CLI",
+  "implementation_branch": "ai/issue-31-replication-quality-checks-v3",
+  "issue_number": 31,
+  "pr_body": "Closes #31\n\n## Summary\n\nAdds a standalone replication quality-check CLI that validates real-data inputs and generated replication outputs before a run is interpreted.\n\n## Changes\n\n- Adds `scripts/check_replication_quality.py` for input CSV, pipeline log, trades, and report checks.\n- Adds tests covering malformed input, duplicate `(timestamp, asset)` rows, empty real-data pipeline logs, report-generation checks, empty-trades warnings, and successful real-data-style outputs.\n- Adds `docs/replication_quality_checks.md` documenting usage and failure/warning behaviour.\n\n## Validation\n\n- `git apply --check /tmp/patch31.diff` on the exact v3 unified diff in a clean temporary git worktree.\n- Static review of the CLI and tests.\n- Full market-data fetch and replication runs were not executed because they require live public exchange API access and generate ignored artefacts.",
+  "pr_title": "Add replication output quality checks",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/patch31.diff on the exact v3 unified diff in a clean temporary git worktree.",
+    "Static review of the CLI and tests.",
+    "Full market-data fetch and replication runs skipped because they require live public exchange API access and generate ignored artefacts."
+  ]
+}
