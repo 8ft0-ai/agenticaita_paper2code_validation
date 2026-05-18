@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Document project board setup runbook",
+  "implementation_branch": "ai/issue-32-project-board-runbook-v2",
+  "issue_number": 32,
+  "pr_body": "Addresses #32\n\n## Summary\n\nDocuments the blocked GitHub Project board setup so the roadmap board can be created reproducibly once a token with Projects permissions is available.\n\n## Changes\n\n- Adds `docs/github_project_board_runbook.md` with the intended board name, status values, custom fields, issue range, setup commands, and acceptance checklist.\n- Records the known Projects-scope blocker and how to verify permissions before setup.\n\n## Validation\n\n- `git apply --check /tmp/issue32.diff` on the exact unified diff in a clean temporary git worktree.\n- Documentation-only change; no market-data, replication, or validation CLIs were run.\n\n## Limitation\n\nThis does not fully close #32 because creating the GitHub Project requires Projects permissions that are not available to the current automation context.",
+  "pr_title": "Document GitHub Project board setup runbook",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue32.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation-only change; no generated market data, validation outputs, or replication artefacts created."
+  ]
+}
