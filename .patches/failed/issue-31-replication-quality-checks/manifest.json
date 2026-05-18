@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add replication quality checks",
+  "implementation_branch": "ai/issue-31-replication-quality-checks",
+  "issue_number": 31,
+  "pr_body": "Closes #31\n\n## Summary\n\nAdds explicit quality checks to the replication CLI so malformed real-data inputs and empty real-data outputs fail before results are interpreted.\n\n## Changes\n\n- Validates non-empty OHLCV input, required input columns, and duplicate `(timestamp, asset)` rows.\n- Validates required pipeline-log and trades columns when outputs are present.\n- Fails real-data runs with an empty pipeline log and warns when no trades are produced.\n- Records quality-check status in `summary.json` and verifies the Markdown report is written.\n- Adds tests for invalid input, real-data output failure, empty-trades warnings, and successful real-data-style quality checks.\n\n## Validation\n\n- Prepared unified diff against current `main`; broker-side `git apply --check` validates the submitted patch.\n- Static review of changed Python and tests.\n- Full market-data fetch and replication runs were not executed because they require live public exchange API access and generate ignored artefacts.",
+  "pr_title": "Add replication output quality checks",
+  "schema_version": "2",
+  "validation": [
+    "Prepared unified diff against current main (6b7407fbc398273713ac4e150fed0218c1540ede); broker-side git apply --check validates the submitted patch.",
+    "Static review of changed Python and tests.",
+    "Full market-data fetch and replication runs skipped because they require live public exchange API access and generate ignored artefacts."
+  ]
+}
