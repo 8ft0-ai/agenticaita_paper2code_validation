@@ -21,6 +21,12 @@ Both paths touch the same paper concepts, but they answer different questions:
 | Are the paper's reported numbers internally consistent, and which claims are unsupported without missing artefacts? | `validation/` |
 | Can we build and run an auditable dry-run system matching the published architecture closely enough to generate comparable artefacts? | `replication/` |
 
+## Artifact Retention Policy
+
+Generated market data, SQLite stores, validation outputs, replication run directories, coverage reports, and broker archives are local artefacts by default and should not be committed. Curated, reviewer-facing summaries may be committed under `docs/` when they are small, deterministic, and derived from reproducible commands.
+
+See [`docs/artifact_retention_policy.md`](docs/artifact_retention_policy.md) for the full retention policy, local run-output naming conventions, and guidance on when to promote generated summaries into versioned documentation.
+
 ## Hyperliquid OHLCV Downloader
 
 This workflow reconstructs public market conditions for the AGENTICAITA paper window. It does not reproduce the original agent decisions or dry-run audit log unless the authors' original artefacts are provided.

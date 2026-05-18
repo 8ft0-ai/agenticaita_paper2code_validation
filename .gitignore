@@ -217,9 +217,14 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Downloaded market data artifacts
-data/hyperliquid_ohlcv*/
-data/binanceusdm_ohlcv*/
-data/bybit_ohlcv*/
-replication/results_real_*/
-replication/results_calibration_sweep*/
+# Generated market data, validation outputs, and replication artefacts
+data/
+replication/results*/
+validation/results*/
+*.sqlite
+*.db
+coverage_report.*
+real_data_validation_results.*
+real_data_validation_report.md
+.DS_Store
+.patches/
