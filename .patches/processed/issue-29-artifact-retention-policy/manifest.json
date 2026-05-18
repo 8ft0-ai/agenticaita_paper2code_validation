@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Document artifact retention policy",
+  "implementation_branch": "ai/issue-29-artifact-retention-policy",
+  "issue_number": 29,
+  "pr_body": "Closes #29\n\n## Summary\n\nDefines a repository policy for generated market data, validation outputs, replication outputs, and curated reports.\n\n## Changes\n\n- Adds a dedicated artifact retention policy under `docs/`.\n- Links the policy from the README.\n- Broadens `.gitignore` coverage for generated data, replication results, validation outputs, databases, local reports, broker archives, and machine-local files.\n\n## Validation\n\n- Broker-side `git apply --check` on the submitted unified diff.\n- Documentation/gitignore-only change; runtime market-data and validation CLIs were not run.",
+  "pr_title": "Define artifact retention policy for generated outputs",
+  "schema_version": "2",
+  "validation": [
+    "Prepared unified diff against current main (59d04924d6c32f3b4bc1ad615a3049699c63c276); broker-side git apply --check validates the submitted patch.",
+    "Documentation/gitignore-only change; no generated market data, SQLite databases, validation outputs, replication outputs, or broker archives are included."
+  ]
+}
