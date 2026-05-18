@@ -56,6 +56,41 @@ python scripts/fetch_hyperliquid_ohlcv.py
 
 The default window is `2026-04-06T00:00:00Z` through `2026-04-11T23:59:59Z`, using `ccxt.hyperliquid` and `1m` candles. Raw per-symbol OHLCV CSV files, `manifest.json`, `market_data.sqlite`, and coverage reports are written under `data/hyperliquid_ohlcv/`, which is intentionally ignored by git. Funding-rate history is requested with CCXT `fetch_funding_rate_history` when the exchange exposes it; unavailable or empty funding history is recorded as metadata and does not block OHLCV reconstruction.
 
+### Historical Hyperliquid Coverage Note
+
+The 15-symbol Hyperliquid reconstruction attempt for the paper window is documented as a venue-specific coverage limitation, not as a replication result. The request used `ccxt.hyperliquid`, `1m` candles, and the window `2026-04-06T00:00:00Z` through `2026-04-11T23:59:59Z`.
+
+Requested symbols:
+
+```text
+BTC/USDC:USDC
+ETH/USDC:USDC
+SOL/USDC:USDC
+AVAX/USDC:USDC
+DOGE/USDC:USDC
+ADA/USDC:USDC
+XRP/USDC:USDC
+DOT/USDC:USDC
+FARTCOIN/USDC:USDC
+XPL/USDC:USDC
+CC/USDC:USDC
+HEMI/USDC:USDC
+S/USDC:USDC
+BCH/USDC:USDC
+ETC/USDC:USDC
+```
+
+Observed coverage:
+
+| Field | Result |
+| --- | ---: |
+| Requested symbols | 15 |
+| Successful symbol fetches | 15 |
+| OHLCV candles returned | 0 per symbol |
+| Funding rows returned | 144 per symbol |
+
+Because the replication harness requires candle closes, the Hyperliquid fetch could not support the real-data replication run despite funding history being available. The repository therefore uses Binance USD-M futures as a CCXT-compatible public perpetual-futures fallback for comparable market-condition checks; that fallback is not treated as evidence for the paper's exact venue, liquidity, order-book state, or original dry-run decisions.
+
 Expected runtime and storage depend on exchange rate limits and active symbol count. A three-symbol smoke run should complete in minutes and use a small local SQLite/CSV footprint. An all-symbol one-minute download for the full five-day window can take tens of minutes or longer and may require hundreds of MB after CSV, SQLite, manifest, and report outputs are included.
 
 The SQLite database is created automatically. Its validation-facing schema is:
