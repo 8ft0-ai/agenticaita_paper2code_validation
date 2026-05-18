@@ -1,0 +1,147 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 32,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-32-project-board-runbook",
+  "commit_message": "Document project board setup runbook",
+  "pr_title": "Document GitHub Project board setup runbook",
+  "pr_body": "Addresses #32
+
+## Summary
+
+Documents the blocked GitHub Project board setup so the roadmap board can be created reproducibly once a token with Projects permissions is available.
+
+## Changes
+
+- Adds `docs/github_project_board_runbook.md` with the intended board name, status values, custom fields, issue range, setup commands, and acceptance checklist.
+- Records the known Projects-scope blocker and how to verify permissions before setup.
+
+## Validation
+
+- `git apply --check /tmp/issue32.diff` on the exact unified diff in a clean temporary git worktree.
+- Documentation-only change; no market-data, replication, or validation CLIs were run.
+
+## Limitation
+
+This does not fully close #32 because creating the GitHub Project requires Projects permissions that are not available to the current automation context.",
+  "validation": [
+    "git apply --check /tmp/issue32.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation-only change; no generated market data, validation outputs, or replication artefacts created."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/github_project_board_runbook.md b/docs/github_project_board_runbook.md
+new file mode 100644
+index 0000000..9d804bb
+--- /dev/null
++++ b/docs/github_project_board_runbook.md
+@@ -0,0 +1,92 @@
++# GitHub Project Board Runbook
++
++Issue #32 requires a GitHub Project board for the replication roadmap. Creating the board requires GitHub Projects permissions that are not available to the current automation token, so this runbook records the intended board shape and the commands to run once a token with `read:project` and project write permissions is available.
++
++This document is not a substitute for the Project itself. It is a reproducible setup guide and acceptance checklist for the blocked Project-creation step.
++
++## Intended board
++
++Use a GitHub Projects v2 board attached to the repository or owning account.
++
++Recommended name:
++
++```text
++AGENTICAITA replication roadmap
++```
++
++Recommended status values:
++
++```text
++Backlog
++Ready
++In Progress
++In Review
++Done
++Blocked / Needs Artefacts
++```
++
++Recommended custom fields:
++
++| Field | Type | Values |
++| --- | --- | --- |
++| `Area` | Single select | `validation`, `replication`, `data`, `docs` |
++| `Priority` | Single select | `P0`, `P1`, `P2` |
++| `Evidence Level` | Single select | `static audit`, `functional replication`, `empirical replication` |
++| `Artifact Dependency` | Single select | `none`, `public data`, `author artefacts required` |
++
++## Issues to add
++
++Add the roadmap issues named in #32:
++
++```text
++#21
++#22
++#23
++#24
++#25
++#26
++#27
++#28
++#29
++#30
++#31
++```
++
++Also add any later follow-up roadmap issues when they replace or extend the original issue range.
++
++## Permission check
++
++Run this first with the intended GitHub token:
++
++```bash
++gh auth status
++gh project list --owner 8ft0-ai
++```
++
++If `gh project list` reports that `read:project` is required, re-authorise the token with the required Projects scopes before attempting board creation.
++
++## Setup procedure
++
++Create the board:
++
++```bash
++gh project create --owner 8ft0-ai --title "AGENTICAITA replication roadmap"
++```
++
++Capture the project number from the command output, then add the issues:
++
++```bash
++PROJECT_NUMBER=<project-number>
++REPO=8ft0-ai/agenticaita_paper2code_validation
++
++for issue in 21 22 23 24 25 26 27 28 29 30 31; do
++  gh project item-add "$PROJECT_NUMBER" --owner 8ft0-ai --url "https://github.com/$REPO/issues/$issue"
++done
++```
++
++Create the custom fields in the Projects web UI if the local `gh` version does not expose field-creation commands. After fields exist, set values for each item according to the issue labels and evidence level implied by the issue body.
++
++Suggested defaults:
++
++| Issue area | Area | Evidence Level | Artifact Dependency |
++| --- | --- | --- | --- |
++| Static validation | `validation` | `static audit` | `none` |
++| Functional replication harness | `replication` | `functional replication` | `none` |
++| Public market-data reconstruction | `data` | `empirical replication` | `public data` |
++| Original-paper evidence gaps | `validation` | `empirical replication` | `author artefacts required` |
++| Documentation and runbooks | `docs` | `static audit` | `none` |
++
++## Acceptance checklist
++
++- The Project exists and is visible to the repository owner.
++- Issues #21 through #31 are present on the board.
++- The status field includes Backlog, Ready, In Progress, In Review, Done, and Blocked / Needs Artefacts.
++- The custom fields `Area`, `Priority`, `Evidence Level`, and `Artifact Dependency` exist with the values listed above.
++- Issue #32 has a comment linking to the Project URL and confirming that the setup is complete.
