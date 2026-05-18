@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Document Hyperliquid OHLCV limitation",
+  "implementation_branch": "ai/issue-28-hyperliquid-coverage-note",
+  "issue_number": 28,
+  "pr_body": "Closes #28\n\n## Summary\n\nDocuments the historical Hyperliquid coverage limitation in the README so the fallback rationale is visible from the main runbook.\n\n## Changes\n\n- Adds the requested Hyperliquid paper-window symbols, window, and `1m` timeframe.\n- Records the observed zero-OHLCV result alongside the available funding rows.\n- States why Binance USD-M is used only as a comparable public market-condition fallback.\n\n## Validation\n\n- `git apply --check /tmp/issue-28.patch`\n- Documentation-only change; runtime market-data and validation CLIs were not run.",
+  "pr_title": "Document Hyperliquid OHLCV availability limitation",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue-28.patch",
+    "Documentation-only README update; no generated market data or replication artefacts created."
+  ]
+}
