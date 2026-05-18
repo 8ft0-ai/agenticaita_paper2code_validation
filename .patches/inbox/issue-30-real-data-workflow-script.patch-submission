@@ -1,0 +1,453 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 30,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-30-real-data-workflow-script",
+  "commit_message": "Add real-data replication workflow script",
+  "pr_title": "Create reproducible real-data replication command script",
+  "pr_body": "Closes #30\n\n## Summary\n\nAdds a single scripted entry point for the public-market real-data replication workflow.\n\n## Changes\n\n- Adds `scripts/run_real_data_replication.py` to orchestrate market-data fetch, SQLite-to-replication CSV export, and replication harness execution.\n- Supports the 15-symbol baseline subset by default and a larger complete-symbol universe via `--profile large`.\n- Adds a skip-fetch/skip-replication smoke test that creates a temporary SQLite candle store and verifies the input-conversion path.\n- Documents dependencies, runtime expectations, baseline and large-universe commands, and smoke-test usage in the README.\n\n## Validation\n\n- Prepared unified diff against current `main`; broker-side `git apply --check` validates the submitted patch.\n- Locally syntax-checked the new script/test content before submission.\n- Full market-data fetch and replication runs were not executed because they require live public exchange API access and can generate large ignored artefacts.",
+  "validation": [
+    "Prepared unified diff against current main (05a42653655f44cd1683605747353f76b971661c); broker-side git apply --check validates the submitted patch.",
+    "Locally syntax-checked the new script/test content before submission.",
+    "Full market-data fetch and replication runs skipped because they require live public exchange API access and generate ignored artefacts."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/README.md b/README.md
+index bfa51a2..b8a1ad1 100644
+--- a/README.md
++++ b/README.md
+@@ -134,6 +134,35 @@ Convert a downloaded SQLite candle store into replication-harness input:
+ python scripts/export_replication_input.py --db data/hyperliquid_ohlcv/market_data.sqlite --out data/hyperliquid_ohlcv/replication_input.csv
+ python scripts/export_replication_input.py --db data/hyperliquid_ohlcv/market_data.sqlite --out data/hyperliquid_ohlcv/replication_input_ohlcv.csv --format ohlcv
+ ```
+ 
++Run the reproducible real-data replication workflow as a single entry point:
++
++```bash
++python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm
++```
++
++The workflow script performs the same stages manually listed below: fetch public market data, export complete one-minute candles into replication input CSV, and run `replication/replicate.py` with `replication/config.yaml`. It requires the normal project dependencies:
++
++```bash
++pip install -r requirements.txt
++```
++
++Expected runtime depends on the exchange, rate limits, and selected universe. The `baseline-15` profile should be treated as a multi-minute to tens-of-minutes run because it downloads a five-day, one-minute window plus funding metadata for the baseline symbol set. The `large` profile can take substantially longer because it may fetch many active markets before selecting the requested number of complete symbols.
++
++Useful examples:
++
++```bash
++# 15-symbol Binance USD-M fallback subset.
++python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm
++
++# Larger complete-symbol universe, capped at 76 exported symbols.
++python scripts/run_real_data_replication.py --profile large --exchange binanceusdm --symbol-limit 76
++
++# Convert an existing local SQLite store without fetching or running replication.
++python scripts/run_real_data_replication.py --skip-fetch --skip-replication --market-db data/binanceusdm_ohlcv_real_subset/market_data.sqlite --replication-input data/binanceusdm_ohlcv_real_subset/replication_input_ohlcv.csv
++
++# Inspect the resolved commands without executing them.
++python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm --dry-run
++```
++
+ For a larger public-market replication universe, fetch Binance USD-M or Bybit fallback data, export only complete symbols, then run the replication harness:
+ 
+ ```bash
+diff --git a/replication/tests/test_real_data_workflow.py b/replication/tests/test_real_data_workflow.py
+new file mode 100644
+index 0000000..f4319b7
+--- /dev/null
++++ b/replication/tests/test_real_data_workflow.py
+@@ -0,0 +1,112 @@
++from __future__ import annotations
++
++import csv
++import sqlite3
++import subprocess
++import sys
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++
++
++def create_market_db(path: Path) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    start = datetime(2026, 4, 6, tzinfo=timezone.utc)
++    rows = []
++    for symbol, base_price in (("BTC/USDT:USDT", 70000.0), ("ETH/USDT:USDT", 3000.0)):
++        for minute in range(3):
++            timestamp = start + timedelta(minutes=minute)
++            timestamp_ms = int(timestamp.timestamp() * 1000)
++            rows.append(
++                (
++                    "binanceusdm",
++                    symbol,
++                    "1m",
++                    timestamp_ms,
++                    timestamp.isoformat().replace("+00:00", "Z"),
++                    base_price + minute,
++                    base_price + minute + 2.0,
++                    base_price + minute - 1.0,
++                    base_price + minute + 0.5,
++                    100.0 + minute,
++                )
++            )
++    with sqlite3.connect(path) as conn:
++        conn.execute(
++            """
++            CREATE TABLE candles (
++                exchange_id TEXT NOT NULL,
++                symbol TEXT NOT NULL,
++                timeframe TEXT NOT NULL,
++                timestamp_ms INTEGER NOT NULL,
++                timestamp TEXT NOT NULL,
++                open REAL NOT NULL,
++                high REAL NOT NULL,
++                low REAL NOT NULL,
++                close REAL NOT NULL,
++                volume REAL NOT NULL
++            )
++            """
++        )
++        conn.executemany(
++            """
++            INSERT INTO candles (
++                exchange_id, symbol, timeframe, timestamp_ms, timestamp,
++                open, high, low, close, volume
++            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++            """,
++            rows,
++        )
++
++
++def test_real_data_workflow_exports_complete_symbols_without_fetch_or_replication(tmp_path: Path) -> None:
++    repo_root = Path(__file__).resolve().parents[2]
++    market_db = tmp_path / "market_data.sqlite"
++    replication_input = tmp_path / "replication_input_ohlcv.csv"
++    symbols_out = tmp_path / "complete_symbols.txt"
++    create_market_db(market_db)
++
++    result = subprocess.run(
++        [
++            sys.executable,
++            "scripts/run_real_data_replication.py",
++            "--skip-fetch",
++            "--skip-replication",
++            "--profile",
++            "baseline-15",
++            "--exchange",
++            "binanceusdm",
++            "--start",
++            "2026-04-06T00:00:00Z",
++            "--end",
++            "2026-04-06T00:02:00Z",
++            "--market-db",
++            str(market_db),
++            "--replication-input",
++            str(replication_input),
++            "--symbols-out",
++            str(symbols_out),
++        ],
++        cwd=repo_root,
++        check=True,
++        capture_output=True,
++        text=True,
++    )
++
++    assert "scripts/export_replication_input.py" in result.stdout
++    assert "wrote 6 rows across 2 selected symbols" in result.stdout
++    assert symbols_out.read_text(encoding="utf-8").splitlines() == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
++
++    with replication_input.open(newline="", encoding="utf-8") as handle:
++        rows = list(csv.DictReader(handle))
++
++    assert len(rows) == 6
++    assert rows[0]["asset"] == "BTC"
++    assert rows[0]["source_symbol"] == "BTC/USDT:USDT"
++    assert {
++        "timestamp",
++        "asset",
++        "exchange_id",
++        "source_symbol",
++        "timeframe",
++        "open",
++        "high",
++        "low",
++        "close",
++        "volume",
++    }.issubset(rows[0])
+diff --git a/scripts/run_real_data_replication.py b/scripts/run_real_data_replication.py
+new file mode 100644
+index 0000000..bb8d6c2
+--- /dev/null
++++ b/scripts/run_real_data_replication.py
+@@ -0,0 +1,291 @@
++#!/usr/bin/env python3
++"""Run the public-market real-data replication workflow end to end."""
++from __future__ import annotations
++
++import argparse
++import json
++import shlex
++import subprocess
++import sys
++from dataclasses import dataclass
++from pathlib import Path
++
++from fetch_hyperliquid_ohlcv import DEFAULT_END, DEFAULT_START
++
++BASELINE_BASE_ASSETS = (
++    "BTC",
++    "ETH",
++    "SOL",
++    "AVAX",
++    "DOGE",
++    "ADA",
++    "XRP",
++    "DOT",
++    "FARTCOIN",
++    "XPL",
++    "CC",
++    "HEMI",
++    "S",
++    "BCH",
++    "ETC",
++)
++
++
++@dataclass(frozen=True)
++class WorkflowPlan:
++    profile: str
++    exchange: str
++    scope: str
++    market_out: Path
++    market_db: Path
++    replication_input: Path
++    symbols_out: Path
++    replication_out: Path
++    fetch_command: list[str] | None
++    export_command: list[str]
++    replication_command: list[str] | None
++
++    def to_dict(self, root: Path) -> dict[str, object]:
++        return {
++            "profile": self.profile,
++            "exchange": self.exchange,
++            "scope": self.scope,
++            "paths": {
++                "market_out": display_path(self.market_out, root),
++                "market_db": display_path(self.market_db, root),
++                "replication_input": display_path(self.replication_input, root),
++                "symbols_out": display_path(self.symbols_out, root),
++                "replication_out": display_path(self.replication_out, root),
++            },
++            "commands": {
++                "fetch": self.fetch_command,
++                "export": self.export_command,
++                "replicate": self.replication_command,
++            },
++        }
++
++
++def display_path(path: Path, root: Path) -> str:
++    try:
++        return str(path.relative_to(root))
++    except ValueError:
++        return str(path)
++
++
++def repo_root() -> Path:
++    return Path(__file__).resolve().parents[1]
++
++
++def quote_asset_for_exchange(exchange: str) -> str:
++    return "USDC" if exchange == "hyperliquid" else "USDT"
++
++
++def baseline_symbols_for_exchange(exchange: str) -> list[str]:
++    quote = quote_asset_for_exchange(exchange)
++    return [f"{asset}/{quote}:{quote}" for asset in BASELINE_BASE_ASSETS]
++
++
++def required_btc_symbol(exchange: str) -> str:
++    quote = quote_asset_for_exchange(exchange)
++    return f"BTC/{quote}:{quote}"
++
++
++def selected_symbol_limit(profile: str, symbol_limit: int | None) -> int:
++    if symbol_limit is not None:
++        if symbol_limit < 1:
++            raise ValueError("--symbol-limit must be at least 1")
++        return symbol_limit
++    return 15 if profile == "baseline-15" else 76
++
++
++def resolve_symbols(profile: str, exchange: str, explicit_symbols: str | None) -> str | None:
++    if explicit_symbols:
++        return explicit_symbols
++    if profile == "baseline-15":
++        return ",".join(baseline_symbols_for_exchange(exchange))
++    return None
++
++
++def build_plan(args: argparse.Namespace) -> WorkflowPlan:
++    root = repo_root()
++    symbol_limit = selected_symbol_limit(args.profile, args.symbol_limit)
++    scope = "real_subset" if args.profile == "baseline-15" else f"large_{symbol_limit}"
++    market_out = Path(args.market_out) if args.market_out else root / "data" / f"{args.exchange}_ohlcv_{scope}"
++    market_db = Path(args.market_db) if args.market_db else market_out / "market_data.sqlite"
++    replication_input = Path(args.replication_input) if args.replication_input else market_out / "replication_input_ohlcv.csv"
++    symbols_out = Path(args.symbols_out) if args.symbols_out else market_out / f"complete_symbols_{symbol_limit}.txt"
++    replication_out = Path(args.replication_out) if args.replication_out else root / "replication" / f"results_real_{args.exchange}_{scope}"
++    symbols = resolve_symbols(args.profile, args.exchange, args.symbols)
++
++    fetch_command: list[str] | None = None
++    if not args.skip_fetch:
++        fetch_command = [
++            args.python,
++            "scripts/fetch_hyperliquid_ohlcv.py",
++            "--exchange",
++            args.exchange,
++            "--timeframe",
++            args.timeframe,
++            "--start",
++            args.start,
++            "--end",
++            args.end,
++            "--out",
++            str(market_out),
++            "--db",
++            str(market_db),
++            "--limit",
++            str(args.limit),
++            "--funding-limit",
++            str(args.funding_limit),
++            "--max-retries",
++            str(args.max_retries),
++            "--retry-sleep",
++            str(args.retry_sleep),
++        ]
++        if symbols:
++            fetch_command.extend(["--symbols", symbols])
++        elif args.fetch_symbol_limit:
++            fetch_command.extend(["--symbol-limit", str(args.fetch_symbol_limit)])
++
++    export_command = [
++        args.python,
++        "scripts/export_replication_input.py",
++        "--db",
++        str(market_db),
++        "--out",
++        str(replication_input),
++        "--exchange",
++        args.exchange,
++        "--timeframe",
++        args.timeframe,
++        "--format",
++        args.export_format,
++        "--complete-only",
++        "--start",
++        args.start,
++        "--end",
++        args.end,
++        "--symbol-limit",
++        str(symbol_limit),
++        "--required-symbol",
++        required_btc_symbol(args.exchange),
++        "--symbols-out",
++        str(symbols_out),
++    ]
++    if symbols:
++        export_command.extend(["--symbols", symbols])
++    if args.include_funding:
++        export_command.append("--include-funding")
++
++    replication_command: list[str] | None = None
++    if not args.skip_replication:
++        replication_command = [
++            args.python,
++            "replication/replicate.py",
++            "--config",
++            args.config,
++            "--input-csv",
++            str(replication_input),
++            "--out",
++            str(replication_out),
++        ]
++
++    return WorkflowPlan(
++        profile=args.profile,
++        exchange=args.exchange,
++        scope=scope,
++        market_out=market_out,
++        market_db=market_db,
++        replication_input=replication_input,
++        symbols_out=symbols_out,
++        replication_out=replication_out,
++        fetch_command=fetch_command,
++        export_command=export_command,
++        replication_command=replication_command,
++    )
++
++
++def run_command(command: list[str], *, cwd: Path, dry_run: bool) -> None:
++    print(f"+ {shlex.join(command)}", flush=True)
++    if not dry_run:
++        subprocess.run(command, cwd=cwd, check=True)
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(
++        description=(
++            "Run the real-data replication workflow: fetch public market data, "
++            "export complete candle coverage into replication input, then run the replication harness."
++        )
++    )
++    parser.add_argument("--profile", choices=("baseline-15", "large"), default="baseline-15", help="symbol-universe profile; defaults to the 15-symbol baseline subset")
++    parser.add_argument("--exchange", default="binanceusdm", help="CCXT exchange id; defaults to Binance USD-M fallback data")
++    parser.add_argument("--symbols", default=None, help="optional comma-separated exchange symbols; overrides the profile symbol set")
++    parser.add_argument("--symbol-limit", type=int, default=None, help="number of complete symbols to export; defaults to 15 for baseline-15 and 76 for large")
++    parser.add_argument("--fetch-symbol-limit", type=int, default=None, help="optional downloader symbol limit for large exploratory fetches")
++    parser.add_argument("--timeframe", default="1m", help="candle timeframe; defaults to 1m")
++    parser.add_argument("--start", default=DEFAULT_START, help="inclusive UTC start timestamp")
++    parser.add_argument("--end", default=DEFAULT_END, help="inclusive UTC end timestamp")
++    parser.add_argument("--market-out", default=None, help="market-data output directory; defaults under data/<exchange>_ohlcv_<scope>/")
++    parser.add_argument("--market-db", default=None, help="SQLite candle database path; defaults to <market-out>/market_data.sqlite")
++    parser.add_argument("--replication-input", default=None, help="exported replication CSV path; defaults under the market-data output directory")
++    parser.add_argument("--symbols-out", default=None, help="path to write the selected complete symbols")
++    parser.add_argument("--replication-out", default=None, help="replication harness output directory; defaults under replication/results_real_<exchange>_<scope>/")
++    parser.add_argument("--config", default="replication/config.yaml", help="replication harness config path")
++    parser.add_argument("--export-format", choices=("close", "ohlcv"), default="ohlcv", help="replication input format; defaults to full OHLCV")
++    parser.add_argument("--include-funding", action="store_true", help="include funding_rate in the exported replication input when available")
++    parser.add_argument("--limit", type=int, default=1000, help="per-request OHLCV candle limit for the fetch step")
++    parser.add_argument("--funding-limit", type=int, default=1000, help="per-request funding history limit for the fetch step")
++    parser.add_argument("--max-retries", type=int, default=2, help="retries per paginated fetch request")
++    parser.add_argument("--retry-sleep", type=float, default=1.0, help="base seconds between fetch retries")
++    parser.add_argument("--skip-fetch", action="store_true", help="use an existing market database and only export/run replication")
++    parser.add_argument("--skip-replication", action="store_true", help="stop after exporting the replication input CSV")
++    parser.add_argument("--dry-run", action="store_true", help="print the resolved plan and commands without running them")
++    parser.add_argument("--python", default=sys.executable, help="Python executable used for subprocess commands")
++    return parser
++
++
++def main(argv: list[str] | None = None) -> int:
++    args = build_parser().parse_args(argv)
++    root = repo_root()
++    plan = build_plan(args)
++    print(json.dumps(plan.to_dict(root), indent=2), flush=True)
++
++    if plan.fetch_command is not None:
++        run_command(plan.fetch_command, cwd=root, dry_run=args.dry_run)
++    run_command(plan.export_command, cwd=root, dry_run=args.dry_run)
++    if plan.replication_command is not None:
++        run_command(plan.replication_command, cwd=root, dry_run=args.dry_run)
++    return 0
++
++
++if __name__ == "__main__":  # pragma: no cover
++    raise SystemExit(main())
