@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Clarify Wiki sync seeding requirement",
+  "implementation_branch": "ai/issue-70-clarify-wiki-seeding",
+  "issue_number": 70,
+  "pr_body": "Closes #70\n\n## Summary\n\nUpdates the Wiki sync workflow and documentation to reflect the observed first-run behaviour: GitHub may not expose the `.wiki.git` backing repository until the Wiki is seeded once through the web UI.\n\n## Changes\n\n- Replaces the failed first-run git initialisation attempt with a clearer workflow error directing maintainers to seed a minimal Wiki Home page through the GitHub UI.\n- Adds a first-run Wiki seeding section to `docs/wiki_sync_workflow.md`.\n- Clarifies that a valid `WIKI_PUSH_TOKEN` can still see a repository-not-found error before the Wiki backing repository exists.\n\n## Validation\n\n- `git apply --check /tmp/issue70.diff` on the exact unified diff in a clean temporary git worktree.\n- Documentation and workflow-shell change only; the Wiki sync workflow was not re-run for this clarification patch.",
+  "pr_title": "Clarify Wiki sync first-run seeding requirement",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue70.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation and workflow-shell change only; Wiki sync workflow not re-run for this clarification patch."
+  ]
+}
