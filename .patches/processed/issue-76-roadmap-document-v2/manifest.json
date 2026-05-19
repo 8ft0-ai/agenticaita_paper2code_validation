@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add issue-native roadmap document",
+  "implementation_branch": "ai/issue-76-roadmap-document-v2",
+  "issue_number": 76,
+  "pr_body": "Closes #76\n\n## Summary\n\nAdds a curated roadmap document that acts as the human-readable planning replacement for the GitHub Project board.\n\n## Changes\n\n- Adds `docs/roadmap.md` with Now, Next, Later, Blocked, and Done sections.\n- Explains how the roadmap relates to issues, labels, milestones, and `agent-ready`.\n- Seeds the roadmap with completed issue-native workflow work and likely next steps.\n\n## Validation\n\n- Prepared v2 with corrected unified-diff hunk line count after the first submission failed at broker `git apply --check`.\n- Documentation-only change; no runtime market-data or validation CLIs were run.",
+  "pr_title": "Add issue-native roadmap document",
+  "schema_version": "2",
+  "validation": [
+    "Prepared v2 with corrected unified-diff hunk line count after the first submission failed at broker git apply --check.",
+    "Documentation-only change; no runtime market-data or validation CLIs were run."
+  ]
+}
