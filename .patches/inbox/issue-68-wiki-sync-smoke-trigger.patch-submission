@@ -1,0 +1,31 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 68,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-68-wiki-sync-smoke-trigger",
+  "commit_message": "Smoke-test Wiki sync trigger",
+  "pr_title": "Smoke-test Wiki sync trigger",
+  "pr_body": "Closes #68\n\n## Summary\n\nMakes a minimal staged-Wiki source change so merging this PR triggers the `Sync staged Wiki pages` workflow on `main`.\n\n## Changes\n\n- Adds a short publication note to `docs/wiki/Home.md`.\n\n## Validation\n\n- `git apply --check /tmp/issue68.diff` on the exact unified diff in a clean temporary git worktree.\n- Documentation-only change; workflow execution is expected after this PR is merged because it changes `docs/wiki/**` on `main`.",
+  "validation": [
+    "git apply --check /tmp/issue68.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation-only change; workflow execution expected after merge because docs/wiki/** changes on main."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/wiki/Home.md b/docs/wiki/Home.md
+index 64e5315..5b3e9b8 100644
+--- a/docs/wiki/Home.md
++++ b/docs/wiki/Home.md
+@@ -21,5 +21,9 @@ This page is the staged Home page for the repository Wiki. It is derived from co
+ 
+ The project contains two complementary validation paths. `validation/` checks whether reported paper quantities are internally consistent and flags unsupported claims. `replication/` runs a functional dry-run approximation of the published architecture and produces comparable artefacts from supplied market data.
+ 
++## Publication
++
++These staged pages are published to the GitHub Wiki by the `Sync staged Wiki pages` workflow after reviewed changes to `docs/wiki/**` reach `main`.
++
+ Public APIs can reconstruct some market-condition inputs, but they cannot recover the original order book snapshots, prompts, LLM calls, risk-manager approvals, SQLite dry-run logs, or exact trade path without author artefacts.
