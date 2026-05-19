@@ -1,0 +1,217 @@
+diff --git a/.github/workflows/paper-window-real-data.yml b/.github/workflows/paper-window-real-data.yml
+new file mode 100644
+index 0000000..e55cd2b
+--- /dev/null
++++ b/.github/workflows/paper-window-real-data.yml
+@@ -0,0 +1,187 @@
++name: Paper Window Real Data Replication
++
++on:
++  workflow_dispatch:
++    inputs:
++      mode:
++        description: closest, hyperliquid, or binanceusdm
++        required: true
++        type: choice
++        default: closest
++        options:
++          - closest
++          - hyperliquid
++          - binanceusdm
++      upload_replication_input:
++        description: Upload exported replication_input_ohlcv.csv
++        required: true
++        type: boolean
++        default: false
++
++permissions:
++  contents: read
++
++jobs:
++  paper-window-real-data:
++    runs-on: ubuntu-latest
++    timeout-minutes: 360
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: "3.11"
++
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          pip install -r requirements.txt
++
++      - name: Run closest paper-window public-data reconstruction
++        id: realdata
++        shell: bash
++        run: |
++          set +e
++          start="2026-04-06T00:00:00Z"
++          end="2026-04-11T23:59:59Z"
++          limit="15"
++          chosen=""
++          fallback_reason=""
++          run_status=1
++          quality_status=1
++          surface_status=0
++
++          attempt_exchange() {
++            exchange="$1"
++            market_out="data/${exchange}_ohlcv_paper_window"
++            replication_out="replication/results_real_${exchange}_paper_window"
++            echo "Attempting ${exchange} for ${start} to ${end}" | tee -a real_data_attempts.log
++            python scripts/run_real_data_replication.py \
++              --profile baseline-15 \
++              --exchange "${exchange}" \
++              --symbol-limit "${limit}" \
++              --start "${start}" \
++              --end "${end}" \
++              --market-out "${market_out}" \
++              --replication-out "${replication_out}" \
++              2>&1 | tee "run_${exchange}.log"
++            return "${PIPESTATUS[0]}"
++          }
++
++          if [ "${{ inputs.mode }}" = "hyperliquid" ]; then
++            attempt_exchange hyperliquid
++            run_status=$?
++            [ "${run_status}" -eq 0 ] && chosen="hyperliquid"
++          elif [ "${{ inputs.mode }}" = "binanceusdm" ]; then
++            attempt_exchange binanceusdm
++            run_status=$?
++            [ "${run_status}" -eq 0 ] && chosen="binanceusdm"
++          else
++            attempt_exchange hyperliquid
++            hyperliquid_status=$?
++            if [ "${hyperliquid_status}" -eq 0 ]; then
++              chosen="hyperliquid"
++              run_status=0
++            else
++              fallback_reason="Hyperliquid did not provide complete exportable OHLCV coverage for the paper window; falling back to Binance USD-M."
++              echo "${fallback_reason}" | tee -a real_data_attempts.log
++              attempt_exchange binanceusdm
++              run_status=$?
++              [ "${run_status}" -eq 0 ] && chosen="binanceusdm"
++            fi
++          fi
++
++          if [ -n "${chosen}" ]; then
++            market_out="data/${chosen}_ohlcv_paper_window"
++            replication_out="replication/results_real_${chosen}_paper_window"
++
++            python scripts/check_replication_quality.py \
++              --input-csv "${market_out}/replication_input_ohlcv.csv" \
++              --results-dir "${replication_out}" \
++              --real-data \
++              > "${replication_out}/quality_report.json" \
++              2> "${replication_out}/quality_report.stderr"
++            quality_status=$?
++
++            if [ "${quality_status}" -ne 0 ] || [ ! -s "${replication_out}/quality_report.json" ]; then
++              QUALITY_STDERR="${replication_out}/quality_report.stderr" QUALITY_JSON="${replication_out}/quality_report.json" python -c 'import json, os; from pathlib import Path; stderr=Path(os.environ["QUALITY_STDERR"]); warning=stderr.read_text(encoding="utf-8") if stderr.exists() else "quality check failed without stderr"; Path(os.environ["QUALITY_JSON"]).write_text(json.dumps({"status":"fail","warnings":[warning.strip()]}, indent=2) + "\n", encoding="utf-8")'
++            fi
++
++            command_text="python scripts/run_real_data_replication.py --profile baseline-15 --exchange ${chosen} --symbol-limit ${limit} --start ${start} --end ${end}"
++            python scripts/build_run_manifest.py --run-dir "${market_out}" --scenario market_data_coverage --commit-sha "${GITHUB_SHA}" --command "${command_text}" --out "${market_out}/run_manifest.json" --base-dir . || surface_status=$?
++            python scripts/build_run_manifest.py --run-dir "${replication_out}" --scenario replication --commit-sha "${GITHUB_SHA}" --command "${command_text}" --out "${replication_out}/run_manifest.json" --base-dir . || surface_status=$?
++            python scripts/build_run_manifest.py --run-dir "${replication_out}" --scenario quality_check --quality-json "${replication_out}/quality_report.json" --commit-sha "${GITHUB_SHA}" --command "python scripts/check_replication_quality.py --input-csv ${market_out}/replication_input_ohlcv.csv --results-dir ${replication_out} --real-data" --out "${replication_out}/quality_run_manifest.json" --base-dir . || surface_status=$?
++            python scripts/index_run_results.py --runs "${market_out}" "${replication_out}" --out-jsonl results_index.jsonl --out-md results_index.md || surface_status=$?
++            python scripts/render_results_dashboard.py --index results_index.jsonl --out results_dashboard.html || surface_status=$?
++          fi
++
++          printf '{"requested_mode":"%s","chosen_exchange":"%s","start":"%s","end":"%s","timeframe":"1m","symbol_limit":"%s","run_status":%s,"quality_status":%s,"surface_status":%s,"fallback_reason":"%s"}\n' \
++            "${{ inputs.mode }}" "${chosen}" "${start}" "${end}" "${limit}" "${run_status}" "${quality_status}" "${surface_status}" "${fallback_reason}" > run_selection.json
++
++          echo "chosen_exchange=${chosen}" >> "$GITHUB_OUTPUT"
++          echo "run_status=${run_status}" >> "$GITHUB_OUTPUT"
++          echo "quality_status=${quality_status}" >> "$GITHUB_OUTPUT"
++          echo "surface_status=${surface_status}" >> "$GITHUB_OUTPUT"
++
++      - name: Prepare optional replication-input upload
++        if: ${{ inputs.upload_replication_input && steps.realdata.outputs.chosen_exchange != '' }}
++        run: cp "data/${{ steps.realdata.outputs.chosen_exchange }}_ohlcv_paper_window/replication_input_ohlcv.csv" replication_input_ohlcv.csv
++
++      - name: Upload paper-window real-data artefacts
++        id: upload-results
++        uses: actions/upload-artifact@v4
++        if: always()
++        with:
++          name: paper-window-real-data-${{ github.run_id }}
++          if-no-files-found: warn
++          path: |
++            run_selection.json
++            real_data_attempts.log
++            run_*.log
++            data/*_ohlcv_paper_window/manifest.json
++            data/*_ohlcv_paper_window/coverage_report.*
++            data/*_ohlcv_paper_window/complete_symbols_*.txt
++            data/*_ohlcv_paper_window/run_manifest.json
++            replication/results_real_*_paper_window/run_manifest.json
++            replication/results_real_*_paper_window/quality_run_manifest.json
++            replication/results_real_*_paper_window/quality_report.*
++            replication/results_real_*_paper_window/summary.json
++            replication/results_real_*_paper_window/replication_report.md
++            results_index.jsonl
++            results_index.md
++            results_dashboard.html
++            replication_input_ohlcv.csv
++
++      - name: Write real-data summary
++        if: always()
++        run: |
++          {
++            echo "# Paper-window real-data replication"
++            echo
++            echo "Requested mode: \`${{ inputs.mode }}\`"
++            echo "Chosen exchange: \`${{ steps.realdata.outputs.chosen_exchange }}\`"
++            echo "Window: \`2026-04-06T00:00:00Z\` to \`2026-04-11T23:59:59Z\`"
++            echo "Timeframe: \`1m\`"
++            echo "Symbol limit: \`15\`"
++            echo "Run status: \`${{ steps.realdata.outputs.run_status }}\`"
++            echo "Quality status: \`${{ steps.realdata.outputs.quality_status }}\`"
++            echo "Surface status: \`${{ steps.realdata.outputs.surface_status }}\`"
++            echo "Uploaded artefact: [paper-window-real-data-${{ github.run_id }}](${{ steps.upload-results.outputs.artifact-url }})"
++            echo
++            echo "Hyperliquid is attempted first in closest mode because it is closest to the paper venue. Binance USD-M is used only when Hyperliquid cannot produce complete exportable OHLCV coverage."
++            echo
++            if [ -f results_index.md ]; then
++              cat results_index.md
++            else
++              echo "No results index was generated. Check uploaded logs and run_selection.json."
++            fi
++          } >> "$GITHUB_STEP_SUMMARY"
++
++      - name: Fail if real-data run failed
++        if: always()
++        run: |
++          if [ "${{ steps.realdata.outputs.run_status }}" != "0" ] || [ "${{ steps.realdata.outputs.quality_status }}" != "0" ] || [ "${{ steps.realdata.outputs.surface_status }}" != "0" ]; then
++            exit 1
++          fi
+diff --git a/docs/paper_window_real_data_workflow.md b/docs/paper_window_real_data_workflow.md
+new file mode 100644
+index 0000000..ec47e06
+--- /dev/null
++++ b/docs/paper_window_real_data_workflow.md
+@@ -0,0 +1,18 @@
++# Paper-Window Real-Data Workflow
++
++The manual `Paper Window Real Data Replication` workflow runs the closest available public-data reconstruction of the AGENTICAITA paper window.
++
++Defaults:
++
++- window: `2026-04-06T00:00:00Z` through `2026-04-11T23:59:59Z`;
++- timeframe: `1m`;
++- profile: `baseline-15`;
++- baseline symbol count: `15`.
++
++Use `closest` mode for the standard reconstruction. It attempts Hyperliquid first because that is closest to the paper venue. If Hyperliquid cannot produce complete exportable OHLCV coverage for the paper window, the workflow falls back to Binance USD-M perpetual futures for the same baseline asset universe.
++
++The workflow runs `scripts/run_real_data_replication.py`, `scripts/check_replication_quality.py`, run-manifest generation, result indexing, dashboard rendering, a GitHub Actions summary, and a compact artefact upload.
++
++Uploaded artefacts include coverage reports, complete-symbol lists, run manifests, quality reports, replication summaries, result indexes, dashboard output, and logs. Raw SQLite databases and raw per-symbol OHLCV CSV directories are not uploaded by default. Set `upload_replication_input` to `true` only when the exported replication input CSV is needed for review or later promotion.
++
++This is a public-market comparable reconstruction, not an exact recovery of the original order books, prompts, LLM calls, dry-run SQLite logs, or execution assumptions.
