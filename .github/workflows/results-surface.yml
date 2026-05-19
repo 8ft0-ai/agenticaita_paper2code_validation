@@ -1,0 +1,102 @@
+name: Results Surface Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/results-surface.yml"
+      - "docs/**"
+      - "replication/**"
+      - "scripts/**"
+      - "tests/**"
+      - "validation/**"
+
+permissions:
+  contents: read
+
+jobs:
+  results-surface:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run validation and replication smoke checks
+        shell: bash
+        run: |
+          set +e
+          validation_status=0
+          replication_status=0
+
+          (
+            cd validation
+            python validate_claims.py --out results
+          ) || validation_status=$?
+
+          if [ -d validation/results ]; then
+            python scripts/build_run_manifest.py \
+              --run-dir validation/results \
+              --scenario static_validation \
+              --commit-sha "${GITHUB_SHA}" \
+              --command "cd validation && python validate_claims.py --out results" \
+              --out validation/results/run_manifest.json \
+              --base-dir .
+          fi
+
+          python replication/replicate.py \
+            --config replication/config.yaml \
+            --out replication/results_ci_synthetic || replication_status=$?
+
+          if [ -d replication/results_ci_synthetic ]; then
+            python scripts/build_run_manifest.py \
+              --run-dir replication/results_ci_synthetic \
+              --scenario replication \
+              --commit-sha "${GITHUB_SHA}" \
+              --command "python replication/replicate.py --config replication/config.yaml --out replication/results_ci_synthetic" \
+              --out replication/results_ci_synthetic/run_manifest.json \
+              --base-dir .
+          fi
+
+          python scripts/index_run_results.py \
+            --runs validation/results replication/results_ci_synthetic \
+            --out-jsonl results_index.jsonl \
+            --out-md results_index.md
+          python scripts/render_results_dashboard.py \
+            --index results_index.jsonl \
+            --out results_dashboard.html
+          python scripts/write_github_step_summary.py \
+            --index results_index.jsonl \
+            --summary-file results_index.md \
+            --dashboard results_dashboard.html
+
+          if [ "$validation_status" -ne 0 ] || [ "$replication_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload run result artefacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-results-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            validation/results/run_manifest.json
+            validation/results/validation_report.md
+            validation/results/validation_results.json
+            validation/results/validation_results.csv
+            replication/results_ci_synthetic/run_manifest.json
+            replication/results_ci_synthetic/summary.json
+            replication/results_ci_synthetic/replication_report.md
+            results_index.jsonl
+            results_index.md
+            results_dashboard.html
