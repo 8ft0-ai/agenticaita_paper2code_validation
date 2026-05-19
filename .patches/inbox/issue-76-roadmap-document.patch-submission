@@ -1,0 +1,108 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 76,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-76-roadmap-document",
+  "commit_message": "Add issue-native roadmap document",
+  "pr_title": "Add issue-native roadmap document",
+  "pr_body": "Closes #76\n\n## Summary\n\nAdds a curated roadmap document that acts as the human-readable planning replacement for the GitHub Project board.\n\n## Changes\n\n- Adds `docs/roadmap.md` with Now, Next, Later, Blocked, and Done sections.\n- Explains how the roadmap relates to issues, labels, milestones, and `agent-ready`.\n- Seeds the roadmap with completed issue-native workflow work and likely next steps.\n\n## Validation\n\n- Prepared unified diff against current `main`; broker-side `git apply --check` validates the submitted patch.\n- Documentation-only change; no runtime market-data or validation CLIs were run.",
+  "validation": [
+    "Prepared unified diff against current main (80b26c8c2d032997fa2d12aaa25d99f3485258ea); broker-side git apply --check validates the submitted patch.",
+    "Documentation-only change; no runtime market-data or validation CLIs were run."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/roadmap.md b/docs/roadmap.md
+new file mode 100644
+index 0000000..8f28eb9
+--- /dev/null
++++ b/docs/roadmap.md
+@@ -0,0 +1,89 @@
++# Roadmap
++
++This roadmap is the human-readable planning index for the repository. It replaces GitHub Projects as the durable planning view that can be inspected through repository files, GitHub issues, pull requests, and assistant-driven development sessions.
++
++The source of truth remains GitHub issues and labels. This document is a curated index that points to the relevant work, explains the current direction, and helps humans and agents choose the next sensible task.
++
++## Operating model
++
++- Issues are the work items.
++- Labels are the workflow fields.
++- Milestones are the planning horizons.
++- `agent-ready` marks work that an assistant can safely pick up without further clarification.
++- Pull requests and patch-submission broker archives provide the implementation audit trail.
++
++See `docs/issue_management.md` for the label taxonomy and readiness rules.
++
++## Now
++
++Current focus: make issue-native development management practical enough to replace the GitHub Project board for day-to-day work.
++
++| Issue | Status | Notes |
++| --- | --- | --- |
++| #76 Add issue-native roadmap document | In progress | Creates this curated roadmap as the planning index. |
++
++## Next
++
++These are the next high-value implementation steps after the roadmap is merged.
++
++| Candidate issue | Area | Why it matters |
++| --- | --- | --- |
++| Create an issue-dashboard generator | automation | Produces a machine-readable and Markdown snapshot of open issues grouped by status, priority, blocked state, milestone, and `agent-ready`. |
++| Add report-only issue hygiene checks | automation | Detects missing labels, conflicting status labels, blocked-but-agent-ready issues, and missing acceptance criteria without mutating issues initially. |
++| Add roadmap-to-Wiki staging page | docs | Mirrors the curated roadmap into `docs/wiki/` so the GitHub Wiki can show the planning index. |
++| Run or automate label setup | workflow | Ensures all labels referenced by issue forms and `docs/issue_management.md` exist in the repository. |
++
++## Later
++
++These items are useful once the core issue-native workflow is stable.
++
++| Theme | Description |
++| --- | --- |
++| Auto-triage suggestions | Suggest `area:*`, `priority:*`, `size:*`, and `agent-ready` candidates from issue-form content. |
++| Dashboard publication | Publish generated issue-dashboard snapshots to `docs/` or Actions artefacts. |
++| Milestone hygiene | Check that accepted roadmap issues are assigned to a milestone when appropriate. |
++| Closed-issue summaries | Periodically summarise completed work into the Wiki evidence and roadmap pages. |
++
++## Blocked
++
++Use this section for visible planning blockers. The issue labels remain the source of truth for blocked work.
++
++| Issue | Blocker | Resolution path |
++| --- | --- | --- |
++| #32 Set up GitHub Project board for replication roadmap | GitHub Projects are not directly visible through the current connector context. | Treat the Project board as optional and keep canonical planning state in issues, labels, milestones, and this roadmap. |
++
++## Done
++
++Completed work that established the current issue-native workflow.
++
++| Issue or PR | Result |
++| --- | --- |
++| #72 Define issue-native label taxonomy and setup script | Added `docs/issue_management.md` and `scripts/setup_issue_labels.py`. |
++| #74 Add structured issue forms for issue-native workflow | Added structured issue forms for bugs, validation, replication, docs, automation, and research. |
++| #66 Add GitHub Actions workflow to sync docs/wiki to repository Wiki | Added Wiki publication from reviewed `docs/wiki/` pages. |
++| #70 Clarify Wiki sync first-run seeding requirement | Documented the one-time Wiki UI seed step. |
++
++## Maintenance rules
++
++- Keep this document short and curated.
++- Do not duplicate full issue bodies here.
++- Use this page to explain sequencing, not to replace labels or milestones.
++- Move active work from `Next` to `Now` only when it is ready to be implemented.
++- Mark blocked work in issues first, then summarise the blocker here.
++- Do not commit generated dashboards into this document by hand; use a separate dashboard file if generated reporting is added.
++
++## Assistant selection rule
++
++When asked to take the next issue, an assistant should use this order:
++
++1. inspect open issues;
++2. prefer `agent-ready` issues;
++3. avoid `status:blocked`, `needs-human`, and `needs-acceptance-criteria`;
++4. prefer `priority:P0`, then `priority:P1`, then `priority:P2`;
++5. prefer `size:small` before larger work;
++6. implement one issue only through the patch-submission broker.
