@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add structured issue forms",
+  "implementation_branch": "ai/issue-74-structured-issue-forms-v2",
+  "issue_number": 74,
+  "pr_body": "Closes #74\n\n## Summary\n\nAdds structured GitHub issue forms aligned with the issue-native development-management model.\n\n## Changes\n\n- Adds issue-template configuration with a link to the issue management guide.\n- Adds forms for bug reports, validation tasks, replication tasks, documentation tasks, automation/workflow tasks, and research questions.\n- Requires acceptance criteria and validation fields for implementation-oriented forms.\n\n## Validation\n\n- `git apply --check /tmp/issue74.patch` on the exact v2 unified diff in a clean temporary git worktree.\n- YAML issue-template structure reviewed manually; no runtime market-data or validation CLIs were run.",
+  "pr_title": "Add structured issue forms for issue-native workflow",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue74.patch on the exact v2 unified diff in a clean temporary git worktree.",
+    "YAML issue-template structure reviewed manually; no runtime market-data or validation CLIs were run."
+  ]
+}

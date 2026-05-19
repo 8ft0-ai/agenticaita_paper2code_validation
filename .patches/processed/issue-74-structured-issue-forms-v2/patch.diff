@@ -1,0 +1,328 @@
+diff --git a/.github/ISSUE_TEMPLATE/automation_task.yml b/.github/ISSUE_TEMPLATE/automation_task.yml
+new file mode 100644
+index 0000000..708e7e6
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/automation_task.yml
+@@ -0,0 +1,47 @@
++name: Automation or workflow task
++description: Add or improve scripts, GitHub Actions, broker workflows, or process automation.
++title: "[Automation]: "
++labels:
++  - needs-triage
++  - area:automation
++body:
++  - type: textarea
++    id: goal
++    attributes:
++      label: Automation goal
++      description: What should the automation do?
++    validations:
++      required: true
++  - type: textarea
++    id: trigger
++    attributes:
++      label: Trigger or entry point
++      description: When or how should it run?
++    validations:
++      required: true
++  - type: textarea
++    id: permissions
++    attributes:
++      label: Permissions and secrets
++      description: List required permissions, tokens, secrets, or external credentials.
++    validations:
++      required: true
++  - type: textarea
++    id: failure_behaviour
++    attributes:
++      label: Failure behaviour
++      description: How should failures be reported or handled?
++    validations:
++      required: true
++  - type: textarea
++    id: acceptance
++    attributes:
++      label: Acceptance criteria
++    validations:
++      required: true
++  - type: textarea
++    id: validation
++    attributes:
++      label: Validation command or check
++    validations:
++      required: true
+diff --git a/.github/ISSUE_TEMPLATE/bug_report.yml b/.github/ISSUE_TEMPLATE/bug_report.yml
+new file mode 100644
+index 0000000..04449f2
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/bug_report.yml
+@@ -0,0 +1,41 @@
++name: Bug or defect
++description: Report a reproducible defect in code, scripts, workflows, or documentation.
++title: "[Bug]: "
++labels:
++  - needs-triage
++body:
++  - type: textarea
++    id: observed
++    attributes:
++      label: Observed behaviour
++      description: What happened?
++    validations:
++      required: true
++  - type: textarea
++    id: expected
++    attributes:
++      label: Expected behaviour
++      description: What should have happened?
++    validations:
++      required: true
++  - type: textarea
++    id: reproduction
++    attributes:
++      label: Reproduction steps
++      description: Provide the smallest command sequence or workflow path that reproduces the problem.
++    validations:
++      required: true
++  - type: textarea
++    id: acceptance
++    attributes:
++      label: Acceptance criteria
++      description: What must be true for this defect to be fixed?
++    validations:
++      required: true
++  - type: textarea
++    id: validation
++    attributes:
++      label: Validation
++      description: Which command or check should be run after the fix?
++    validations:
++      required: true
+diff --git a/.github/ISSUE_TEMPLATE/config.yml b/.github/ISSUE_TEMPLATE/config.yml
+new file mode 100644
+index 0000000..e5e3efc
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/config.yml
+@@ -0,0 +1,5 @@
++blank_issues_enabled: true
++contact_links:
++  - name: Issue management guide
++    url: https://github.com/8ft0-ai/agenticaita_paper2code_validation/blob/main/docs/issue_management.md
++    about: Read the issue-native workflow and label taxonomy before creating broad roadmap issues.
+diff --git a/.github/ISSUE_TEMPLATE/docs_task.yml b/.github/ISSUE_TEMPLATE/docs_task.yml
+new file mode 100644
+index 0000000..38cdbfb
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/docs_task.yml
+@@ -0,0 +1,41 @@
++name: Documentation task
++description: Add or improve repository documentation, Wiki staging pages, or runbooks.
++title: "[Docs]: "
++labels:
++  - needs-triage
++  - area:docs
++body:
++  - type: textarea
++    id: audience
++    attributes:
++      label: Audience
++      description: Who is the document for?
++    validations:
++      required: true
++  - type: textarea
++    id: goal
++    attributes:
++      label: Documentation goal
++      description: What should the reader understand or be able to do?
++    validations:
++      required: true
++  - type: input
++    id: target_location
++    attributes:
++      label: Target location
++      placeholder: docs/example.md or docs/wiki/Example.md
++    validations:
++      required: true
++  - type: textarea
++    id: acceptance
++    attributes:
++      label: Acceptance criteria
++    validations:
++      required: true
++  - type: textarea
++    id: validation
++    attributes:
++      label: Validation
++      description: For docs-only changes, state the review or check performed.
++    validations:
++      required: true
+diff --git a/.github/ISSUE_TEMPLATE/replication_task.yml b/.github/ISSUE_TEMPLATE/replication_task.yml
+new file mode 100644
+index 0000000..c5eb433
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/replication_task.yml
+@@ -0,0 +1,51 @@
++name: Replication task
++description: Implement or improve functional or real-data replication workflow.
++title: "[Replication]: "
++labels:
++  - needs-triage
++  - area:replication
++body:
++  - type: textarea
++    id: goal
++    attributes:
++      label: Replication goal
++      description: What behaviour, run path, or paper mechanism should be replicated or improved?
++    validations:
++      required: true
++  - type: textarea
++    id: scope
++    attributes:
++      label: Scope
++      description: Keep this to one focused patch where possible.
++    validations:
++      required: true
++  - type: dropdown
++    id: replication_type
++    attributes:
++      label: Replication type
++      options:
++        - functional replication
++        - public real-data reconstruction
++        - quality check or audit output
++        - documentation/runbook support
++    validations:
++      required: true
++  - type: textarea
++    id: expected_artifacts
++    attributes:
++      label: Expected artefacts
++      description: List generated outputs, and state whether they must remain local.
++    validations:
++      required: true
++  - type: textarea
++    id: acceptance
++    attributes:
++      label: Acceptance criteria
++    validations:
++      required: true
++  - type: textarea
++    id: validation
++    attributes:
++      label: Validation command
++    validations:
++      required: true
+diff --git a/.github/ISSUE_TEMPLATE/research_question.yml b/.github/ISSUE_TEMPLATE/research_question.yml
+new file mode 100644
+index 0000000..0779fa2
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/research_question.yml
+@@ -0,0 +1,41 @@
++name: Research question
++description: Track an exploratory question before it becomes an implementation task.
++title: "[Research]: "
++labels:
++  - needs-triage
++  - area:research
++body:
++  - type: textarea
++    id: question
++    attributes:
++      label: Research question
++      description: What decision or uncertainty needs investigation?
++    validations:
++      required: true
++  - type: textarea
++    id: context
++    attributes:
++      label: Context
++      description: Why does this matter to validation, replication, data, docs, or automation?
++    validations:
++      required: true
++  - type: textarea
++    id: evidence_needed
++    attributes:
++      label: Evidence needed
++      description: What sources, data, experiments, or examples would answer the question?
++    validations:
++      required: true
++  - type: textarea
++    id: decision
++    attributes:
++      label: Decision enabled
++      description: What implementation or planning decision will this research unlock?
++    validations:
++      required: true
++  - type: textarea
++    id: done
++    attributes:
++      label: Done when
++    validations:
++      required: true
+diff --git a/.github/ISSUE_TEMPLATE/validation_task.yml b/.github/ISSUE_TEMPLATE/validation_task.yml
+new file mode 100644
+index 0000000..d413794
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/validation_task.yml
+@@ -0,0 +1,60 @@
++name: Validation task
++description: Validate a claim, metric, assumption, or reportable result.
++title: "[Validation]: "
++labels:
++  - needs-triage
++  - area:validation
++body:
++  - type: textarea
++    id: claim
++    attributes:
++      label: Claim or assumption
++      description: What claim, metric, or assumption should be validated?
++    validations:
++      required: true
++  - type: textarea
++    id: evidence
++    attributes:
++      label: Available evidence
++      description: Identify source files, paper sections, public data, or prior reports.
++    validations:
++      required: true
++  - type: dropdown
++    id: evidence_level
++    attributes:
++      label: Evidence level
++      options:
++        - evidence:static-audit
++        - evidence:functional-replication
++        - evidence:empirical-replication
++    validations:
++      required: true
++  - type: dropdown
++    id: artifact_dependency
++    attributes:
++      label: Artifact dependency
++      options:
++        - artifact:none
++        - artifact:public-data
++        - artifact:author-artifacts-required
++    validations:
++      required: true
++  - type: textarea
++    id: method
++    attributes:
++      label: Proposed method
++      description: Describe the validation approach.
++    validations:
++      required: true
++  - type: textarea
++    id: acceptance
++    attributes:
++      label: Acceptance criteria
++    validations:
++      required: true
++  - type: textarea
++    id: validation
++    attributes:
++      label: Validation command
++    validations:
++      required: true
