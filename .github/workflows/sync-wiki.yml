@@ -59,12 +59,8 @@ jobs:
           if git clone "$remote_url" "$wiki_dir"; then
             echo "Cloned existing Wiki repository."
           else
-            echo "Wiki clone failed; attempting first-run initialisation."
-            rm -rf "$wiki_dir"
-            mkdir -p "$wiki_dir"
-            git -C "$wiki_dir" init
-            git -C "$wiki_dir" checkout -B master
-            git -C "$wiki_dir" remote add origin "$remote_url"
+            echo "::error::Wiki clone failed. If this is the first Wiki sync, create and save a minimal Home page once in the GitHub Wiki UI, then rerun this workflow."
+            exit 1
           fi
 
           find "$wiki_dir" -maxdepth 1 -type f -name '*.md' -delete
