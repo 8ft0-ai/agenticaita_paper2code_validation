@@ -1,0 +1,31 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 68,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-68-wiki-sync-smoke-trigger-v2",
+  "commit_message": "Smoke-test Wiki sync trigger",
+  "pr_title": "Smoke-test Wiki sync trigger",
+  "pr_body": "Closes #68\n\n## Summary\n\nAdds a minimal staged-Wiki smoke-test page so merging this PR triggers the `Sync staged Wiki pages` workflow on `main`.\n\n## Changes\n\n- Adds `docs/wiki/Wiki-Sync-Smoke-Test.md`.\n\n## Validation\n\n- Prepared v2 as a new-file-only patch after the first submission failed at broker `git apply --check`.\n- Documentation-only change; workflow execution is expected after this PR is merged because it changes `docs/wiki/**` on `main`.",
+  "validation": [
+    "Prepared v2 as a new-file-only patch after the first submission failed at broker git apply --check.",
+    "Documentation-only change; workflow execution expected after merge because docs/wiki/** changes on main."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/wiki/Wiki-Sync-Smoke-Test.md b/docs/wiki/Wiki-Sync-Smoke-Test.md
+new file mode 100644
+index 0000000..c4d30ff
+--- /dev/null
++++ b/docs/wiki/Wiki-Sync-Smoke-Test.md
+@@ -0,0 +1,9 @@
++# Wiki Sync Smoke Test
++
++This staged Wiki page exists to exercise the `Sync staged Wiki pages` workflow trigger.
++
++When this file reaches `main`, the workflow should run because it is configured for pushes that change `docs/wiki/**`.
++
++The page can remain as a lightweight operational note, or be removed after the Wiki publication path has been verified.
