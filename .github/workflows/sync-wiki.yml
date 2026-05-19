@@ -1,0 +1,87 @@
+name: Sync staged Wiki pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/wiki/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-wiki
+  cancel-in-progress: false
+
+jobs:
+  sync-wiki:
+    name: Sync docs/wiki to GitHub Wiki
+    runs-on: ubuntu-latest
+    env:
+      WIKI_PUSH_TOKEN: ${{ secrets.WIKI_PUSH_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate staged Wiki source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d docs/wiki ]; then
+            echo "::error::docs/wiki does not exist; nothing to publish."
+            exit 1
+          fi
+          if [ ! -f docs/wiki/Home.md ]; then
+            echo "::error::docs/wiki/Home.md is required for the Wiki Home page."
+            exit 1
+          fi
+          page_count=$(find docs/wiki -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
+          if [ "$page_count" -eq 0 ]; then
+            echo "::error::docs/wiki contains no Markdown pages."
+            exit 1
+          fi
+          echo "Found $page_count staged Wiki page(s)."
+
+      - name: Publish Wiki pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${WIKI_PUSH_TOKEN:-}" ]; then
+            echo "::error::WIKI_PUSH_TOKEN is not configured. Create a repository secret with permission to write to the repository Wiki."
+            exit 1
+          fi
+
+          wiki_dir="$RUNNER_TEMP/wiki"
+          remote_url="https://x-access-token:${WIKI_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+
+          if git clone "$remote_url" "$wiki_dir"; then
+            echo "Cloned existing Wiki repository."
+          else
+            echo "Wiki clone failed; attempting first-run initialisation."
+            rm -rf "$wiki_dir"
+            mkdir -p "$wiki_dir"
+            git -C "$wiki_dir" init
+            git -C "$wiki_dir" checkout -B master
+            git -C "$wiki_dir" remote add origin "$remote_url"
+          fi
+
+          find "$wiki_dir" -maxdepth 1 -type f -name '*.md' -delete
+          cp docs/wiki/*.md "$wiki_dir"/
+
+          git -C "$wiki_dir" config user.name "github-actions[bot]"
+          git -C "$wiki_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$wiki_dir" add -A
+
+          if git -C "$wiki_dir" diff --cached --quiet; then
+            echo "Wiki pages are already up to date."
+            exit 0
+          fi
+
+          git -C "$wiki_dir" commit -m "Sync Wiki pages from ${GITHUB_SHA}"
+          branch=$(git -C "$wiki_dir" branch --show-current || true)
+          if [ -z "$branch" ]; then
+            branch="master"
+          fi
+          git -C "$wiki_dir" push origin "HEAD:${branch}"
