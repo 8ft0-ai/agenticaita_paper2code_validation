@@ -1,0 +1,158 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 66,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-66-sync-wiki-workflow",
+  "commit_message": "Add Wiki sync workflow",
+  "pr_title": "Add GitHub Actions workflow to sync Wiki pages",
+  "pr_body": "Closes #66\n\n## Summary\n\nAdds a GitHub Actions workflow that publishes reviewed `docs/wiki/*.md` pages to the repository Wiki.\n\n## Changes\n\n- Adds `.github/workflows/sync-wiki.yml` with `workflow_dispatch` and `main`/`docs/wiki/**` triggers.\n- Publishes staged Wiki Markdown pages to the `.wiki.git` remote using `WIKI_PUSH_TOKEN`.\n- Supports first-run Wiki initialisation by creating a local Wiki repository when clone fails, then pushing to the Wiki remote.\n- Documents token requirements, trigger behaviour, publication behaviour, and failure modes in `docs/wiki_sync_workflow.md`.\n\n## Validation\n\n- `git apply --check /tmp/issue66.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow syntax reviewed for GitHub Actions YAML structure and shell failure paths.\n- The workflow itself was not run because it requires a configured `WIKI_PUSH_TOKEN` secret and live Wiki remote access.",
+  "validation": [
+    "git apply --check /tmp/issue66.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow syntax reviewed for GitHub Actions YAML structure and shell failure paths.",
+    "Workflow execution skipped because it requires a configured WIKI_PUSH_TOKEN secret and live Wiki remote access."
+  ],
+  "allow_workflow_changes": true
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/.github/workflows/sync-wiki.yml b/.github/workflows/sync-wiki.yml
+new file mode 100644
+index 0000000..de5d78d
+--- /dev/null
++++ b/.github/workflows/sync-wiki.yml
+@@ -0,0 +1,87 @@
++name: Sync staged Wiki pages
++
++on:
++  workflow_dispatch:
++  push:
++    branches:
++      - main
++    paths:
++      - "docs/wiki/**"
++
++permissions:
++  contents: read
++
++concurrency:
++  group: sync-wiki
++  cancel-in-progress: false
++
++jobs:
++  sync-wiki:
++    name: Sync docs/wiki to GitHub Wiki
++    runs-on: ubuntu-latest
++    env:
++      WIKI_PUSH_TOKEN: ${{ secrets.WIKI_PUSH_TOKEN }}
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Validate staged Wiki source
++        shell: bash
++        run: |
++          set -euo pipefail
++          if [ ! -d docs/wiki ]; then
++            echo "::error::docs/wiki does not exist; nothing to publish."
++            exit 1
++          fi
++          if [ ! -f docs/wiki/Home.md ]; then
++            echo "::error::docs/wiki/Home.md is required for the Wiki Home page."
++            exit 1
++          fi
++          page_count=$(find docs/wiki -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
++          if [ "$page_count" -eq 0 ]; then
++            echo "::error::docs/wiki contains no Markdown pages."
++            exit 1
++          fi
++          echo "Found $page_count staged Wiki page(s)."
++
++      - name: Publish Wiki pages
++        shell: bash
++        run: |
++          set -euo pipefail
++          if [ -z "${WIKI_PUSH_TOKEN:-}" ]; then
++            echo "::error::WIKI_PUSH_TOKEN is not configured. Create a repository secret with permission to write to the repository Wiki."
++            exit 1
++          fi
++
++          wiki_dir="$RUNNER_TEMP/wiki"
++          remote_url="https://x-access-token:${WIKI_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
++
++          if git clone "$remote_url" "$wiki_dir"; then
++            echo "Cloned existing Wiki repository."
++          else
++            echo "Wiki clone failed; attempting first-run initialisation."
++            rm -rf "$wiki_dir"
++            mkdir -p "$wiki_dir"
++            git -C "$wiki_dir" init
++            git -C "$wiki_dir" checkout -B master
++            git -C "$wiki_dir" remote add origin "$remote_url"
++          fi
++
++          find "$wiki_dir" -maxdepth 1 -type f -name '*.md' -delete
++          cp docs/wiki/*.md "$wiki_dir"/
++
++          git -C "$wiki_dir" config user.name "github-actions[bot]"
++          git -C "$wiki_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
++          git -C "$wiki_dir" add -A
++
++          if git -C "$wiki_dir" diff --cached --quiet; then
++            echo "Wiki pages are already up to date."
++            exit 0
++          fi
++
++          git -C "$wiki_dir" commit -m "Sync Wiki pages from ${GITHUB_SHA}"
++          branch=$(git -C "$wiki_dir" branch --show-current || true)
++          if [ -z "$branch" ]; then
++            branch="master"
++          fi
++          git -C "$wiki_dir" push origin "HEAD:${branch}"
+diff --git a/docs/wiki_sync_workflow.md b/docs/wiki_sync_workflow.md
+new file mode 100644
+index 0000000..82a1438
+--- /dev/null
++++ b/docs/wiki_sync_workflow.md
+@@ -0,0 +1,40 @@
++# Wiki Sync Workflow
++
++The staged GitHub Wiki source pages live in `docs/wiki/` so they can be reviewed through the normal repository pull-request process before publication.
++
++The `Sync staged Wiki pages` GitHub Actions workflow publishes those reviewed pages to the repository Wiki.
++
++## Trigger behaviour
++
++The workflow runs when either of these events occurs:
++
++- a maintainer manually starts `workflow_dispatch`;
++- a push to `main` changes files under `docs/wiki/**`.
++
++## Required secret
++
++Configure a repository secret named `WIKI_PUSH_TOKEN` before running the workflow. The token must have permission to push to the repository Wiki remote:
++
++```text
++https://github.com/8ft0-ai/agenticaita_paper2code_validation.wiki.git
++```
++
++The default `GITHUB_TOKEN` is not used for the push because the Wiki is backed by a separate `.wiki.git` repository and may require explicit write credentials.
++
++## Publication behaviour
++
++The workflow validates that `docs/wiki/Home.md` exists, then publishes all Markdown files in `docs/wiki/` to the Wiki repository root. It removes existing root-level Wiki Markdown pages before copying the staged pages, so `docs/wiki/` remains the source of truth.
++
++If the Wiki repository can be cloned, the workflow commits to its existing current branch. If cloning fails, the workflow attempts first-run initialisation by creating a local Wiki repository on `master` and pushing it to the `.wiki.git` remote.
++
++## Failure modes
++
++The workflow exits with a clear error when:
++
++- `docs/wiki/` is missing;
++- `docs/wiki/Home.md` is missing;
++- there are no staged Markdown pages;
++- `WIKI_PUSH_TOKEN` is not configured;
++- the Wiki remote cannot be cloned, initialised, or pushed.
++
++No generated Wiki build outputs are committed to `main`.
