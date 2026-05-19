@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Smoke-test Wiki sync trigger",
+  "implementation_branch": "ai/issue-68-wiki-sync-smoke-trigger-v2",
+  "issue_number": 68,
+  "pr_body": "Closes #68\n\n## Summary\n\nAdds a minimal staged-Wiki smoke-test page so merging this PR triggers the `Sync staged Wiki pages` workflow on `main`.\n\n## Changes\n\n- Adds `docs/wiki/Wiki-Sync-Smoke-Test.md`.\n\n## Validation\n\n- Prepared v2 as a new-file-only patch after the first submission failed at broker `git apply --check`.\n- Documentation-only change; workflow execution is expected after this PR is merged because it changes `docs/wiki/**` on `main`.",
+  "pr_title": "Smoke-test Wiki sync trigger",
+  "schema_version": "2",
+  "validation": [
+    "Prepared v2 as a new-file-only patch after the first submission failed at broker git apply --check.",
+    "Documentation-only change; workflow execution expected after merge because docs/wiki/** changes on main."
+  ]
+}
