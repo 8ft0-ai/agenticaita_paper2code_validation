@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Issue management guide
+    url: https://github.com/8ft0-ai/agenticaita_paper2code_validation/blob/main/docs/issue_management.md
+    about: Read the issue-native workflow and label taxonomy before creating broad roadmap issues.

@@ -1,0 +1,51 @@
+name: Replication task
+description: Implement or improve functional or real-data replication workflow.
+title: "[Replication]: "
+labels:
+  - needs-triage
+  - area:replication
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Replication goal
+      description: What behaviour, run path, or paper mechanism should be replicated or improved?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Keep this to one focused patch where possible.
+    validations:
+      required: true
+  - type: dropdown
+    id: replication_type
+    attributes:
+      label: Replication type
+      options:
+        - functional replication
+        - public real-data reconstruction
+        - quality check or audit output
+        - documentation/runbook support
+    validations:
+      required: true
+  - type: textarea
+    id: expected_artifacts
+    attributes:
+      label: Expected artefacts
+      description: List generated outputs, and state whether they must remain local.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation command
+    validations:
+      required: true

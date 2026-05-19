@@ -1,0 +1,47 @@
+name: Automation or workflow task
+description: Add or improve scripts, GitHub Actions, broker workflows, or process automation.
+title: "[Automation]: "
+labels:
+  - needs-triage
+  - area:automation
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Automation goal
+      description: What should the automation do?
+    validations:
+      required: true
+  - type: textarea
+    id: trigger
+    attributes:
+      label: Trigger or entry point
+      description: When or how should it run?
+    validations:
+      required: true
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permissions and secrets
+      description: List required permissions, tokens, secrets, or external credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: failure_behaviour
+    attributes:
+      label: Failure behaviour
+      description: How should failures be reported or handled?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation command or check
+    validations:
+      required: true

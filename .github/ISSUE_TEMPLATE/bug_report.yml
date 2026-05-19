@@ -1,0 +1,41 @@
+name: Bug or defect
+description: Report a reproducible defect in code, scripts, workflows, or documentation.
+title: "[Bug]: "
+labels:
+  - needs-triage
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behaviour
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest command sequence or workflow path that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this defect to be fixed?
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Which command or check should be run after the fix?
+    validations:
+      required: true

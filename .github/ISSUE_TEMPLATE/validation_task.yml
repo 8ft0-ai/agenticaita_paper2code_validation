@@ -1,0 +1,60 @@
+name: Validation task
+description: Validate a claim, metric, assumption, or reportable result.
+title: "[Validation]: "
+labels:
+  - needs-triage
+  - area:validation
+body:
+  - type: textarea
+    id: claim
+    attributes:
+      label: Claim or assumption
+      description: What claim, metric, or assumption should be validated?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Available evidence
+      description: Identify source files, paper sections, public data, or prior reports.
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence_level
+    attributes:
+      label: Evidence level
+      options:
+        - evidence:static-audit
+        - evidence:functional-replication
+        - evidence:empirical-replication
+    validations:
+      required: true
+  - type: dropdown
+    id: artifact_dependency
+    attributes:
+      label: Artifact dependency
+      options:
+        - artifact:none
+        - artifact:public-data
+        - artifact:author-artifacts-required
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: Proposed method
+      description: Describe the validation approach.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation command
+    validations:
+      required: true

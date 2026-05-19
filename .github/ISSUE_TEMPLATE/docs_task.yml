@@ -1,0 +1,41 @@
+name: Documentation task
+description: Add or improve repository documentation, Wiki staging pages, or runbooks.
+title: "[Docs]: "
+labels:
+  - needs-triage
+  - area:docs
+body:
+  - type: textarea
+    id: audience
+    attributes:
+      label: Audience
+      description: Who is the document for?
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Documentation goal
+      description: What should the reader understand or be able to do?
+    validations:
+      required: true
+  - type: input
+    id: target_location
+    attributes:
+      label: Target location
+      placeholder: docs/example.md or docs/wiki/Example.md
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: For docs-only changes, state the review or check performed.
+    validations:
+      required: true
