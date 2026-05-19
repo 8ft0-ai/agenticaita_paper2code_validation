@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add CI results summary workflow",
+  "implementation_branch": "ai/issue-56-actions-results-summary-v3",
+  "issue_number": 56,
+  "pr_body": "Closes #56\n\n## Summary\n\nSurfaces automated validation and replication smoke-run results in GitHub Actions through a concise job summary and uploaded artefacts.\n\n## Changes\n\n- Adds a workflow that runs static validation and a deterministic replication smoke run, builds run manifests, indexes the outputs, renders the local dashboard, writes `$GITHUB_STEP_SUMMARY`, and uploads safe summary artefacts.\n- Adds `scripts/write_github_step_summary.py` for rendering CI-friendly Markdown from `results_index.jsonl`.\n- Adds `docs/github_actions_results_surface.md` documenting where to find summaries and downloaded artefacts.\n- Adds tests covering summary rendering, warnings, artefact names, missing metrics, and invalid JSONL diagnostics.\n\n## Validation\n\n- `git apply --check /tmp/issue56-v3.patch` in a clean temporary git worktree.\n- `python -m py_compile scripts/write_github_step_summary.py tests/test_write_github_step_summary.py` on staged file contents.\n- Full live market-data fetch was not run; the workflow intentionally avoids raw market-data SQLite/CSV uploads and uses static validation plus deterministic replication smoke outputs.",
+  "pr_title": "Add GitHub Actions results summary and artefacts",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue56-v3.patch in a clean temporary git worktree.",
+    "python -m py_compile scripts/write_github_step_summary.py tests/test_write_github_step_summary.py on staged file contents.",
+    "Full live market-data fetch skipped; workflow intentionally avoids raw market-data SQLite/CSV uploads and uses static validation plus deterministic replication smoke outputs."
+  ]
+}
