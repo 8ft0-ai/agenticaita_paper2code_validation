@@ -1,0 +1,376 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 63,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-63-release-snapshot-workflows",
+  "commit_message": "Add retained snapshot release workflows",
+  "pr_title": "Add retained paper-window snapshot release workflows",
+  "pr_body": "Closes #63\n\n## Summary\n\nImplements the retained external artefact plan using GitHub Release assets for long-lived paper-window snapshots and Actions artefacts for temporary per-run evidence.\n\n## Changes\n\n- Adds a manual promotion workflow that downloads a selected Actions artefact, packages the retained subset, computes a checksum, creates or updates a GitHub Release, and uploads release assets.\n- Adds a manual verification workflow that downloads the release asset, verifies the checksum, extracts the archive, and checks required files.\n- Adds a pointer manifest template under `docs/artifacts/`.\n- Documents the workflow, release asset shape, download commands, and interpretation limits.\n\n## Validation\n\n- `git apply --check /tmp/issue63-release-snapshot-workflows.patch` in a clean temporary git worktree.\n- Static review of workflow permissions, shell steps, release commands, and retained artefact filters.\n- Live promotion was not run because it requires a successful source Actions artefact containing the real-data snapshot.",
+  "validation": [
+    "git apply --check /tmp/issue63-release-snapshot-workflows.patch in a clean temporary git worktree.",
+    "Static review of workflow permissions, shell steps, release commands, and retained artefact filters.",
+    "Live promotion not run because it requires a successful source Actions artefact containing the real-data snapshot."
+  ],
+  "allow_workflow_changes": true
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/.github/workflows/promote-paper-window-snapshot.yml b/.github/workflows/promote-paper-window-snapshot.yml
+new file mode 100644
+index 0000000..7d2f4b1
+--- /dev/null
++++ b/.github/workflows/promote-paper-window-snapshot.yml
+@@ -0,0 +1,156 @@
++name: Promote Paper Window Snapshot
++
++on:
++  workflow_dispatch:
++    inputs:
++      source_run_id:
++        description: Workflow run id containing the paper-window Actions artefact
++        required: true
++      source_artifact_name:
++        description: Optional exact Actions artefact name. Leave blank to download all artefacts from the run.
++        required: false
++        default: ""
++      release_tag:
++        description: GitHub Release tag for the retained snapshot
++        required: true
++        default: paper-window-real-data-20260406-20260411
++      archive_base:
++        description: Base filename for release assets
++        required: true
++        default: paper-window-real-data-20260406-20260411
++      include_replication_input:
++        description: Include exported replication_input_ohlcv.csv in the retained archive
++        required: true
++        type: boolean
++        default: true
++      overwrite_release_assets:
++        description: Replace existing assets on an existing release
++        required: true
++        type: boolean
++        default: false
++
++permissions:
++  actions: read
++  contents: write
++
++jobs:
++  promote:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Download source Actions artefact
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          mkdir -p snapshot-source
++          if [ -n "${{ inputs.source_artifact_name }}" ]; then
++            gh run download "${{ inputs.source_run_id }}" --name "${{ inputs.source_artifact_name }}" --dir snapshot-source
++          else
++            gh run download "${{ inputs.source_run_id }}" --dir snapshot-source
++          fi
++          find snapshot-source -maxdepth 5 -type f | sort
++
++      - name: Build retained archive
++        shell: bash
++        run: |
++          set -euo pipefail
++          base="${{ inputs.archive_base }}"
++          tag="${{ inputs.release_tag }}"
++          mkdir -p release-artifacts "release-stage/${base}"
++
++          copy_if_present() {
++            local src="$1"
++            if [ -f "snapshot-source/${src}" ]; then
++              mkdir -p "release-stage/${base}/$(dirname "${src}")"
++              cp "snapshot-source/${src}" "release-stage/${base}/${src}"
++            fi
++          }
++
++          copy_glob() {
++            local pattern="$1"
++            shopt -s nullglob
++            for file in snapshot-source/${pattern}; do
++              local rel="${file#snapshot-source/}"
++              copy_if_present "${rel}"
++            done
++            shopt -u nullglob
++          }
++
++          copy_if_present run_selection.json
++          copy_if_present real_data_attempts.log
++          copy_if_present results_index.jsonl
++          copy_if_present results_index.md
++          copy_if_present results_dashboard.html
++          copy_glob 'run_*.log'
++          copy_glob 'data/*_ohlcv_paper_window/manifest.json'
++          copy_glob 'data/*_ohlcv_paper_window/coverage_report.json'
++          copy_glob 'data/*_ohlcv_paper_window/coverage_report.md'
++          copy_glob 'data/*_ohlcv_paper_window/complete_symbols_*.txt'
++          copy_glob 'data/*_ohlcv_paper_window/run_manifest.json'
++          copy_glob 'replication/results_real_*_paper_window/run_manifest.json'
++          copy_glob 'replication/results_real_*_paper_window/quality_run_manifest.json'
++          copy_glob 'replication/results_real_*_paper_window/quality_report.json'
++          copy_glob 'replication/results_real_*_paper_window/quality_report.stderr'
++          copy_glob 'replication/results_real_*_paper_window/summary.json'
++          copy_glob 'replication/results_real_*_paper_window/replication_report.md'
++          if [ "${{ inputs.include_replication_input }}" = "true" ]; then
++            copy_if_present replication_input_ohlcv.csv
++          fi
++
++          if ! find "release-stage/${base}" -type f | grep -q .; then
++            echo "No safe files were found in the source artefact."
++            exit 1
++          fi
++
++          python - <<'PY'
++          import json
++          from datetime import datetime, timezone
++          from pathlib import Path
++          base = "${{ inputs.archive_base }}"
++          tag = "${{ inputs.release_tag }}"
++          root = Path("release-stage") / base
++          files = sorted(str(path.relative_to(root)) for path in root.rglob("*") if path.is_file())
++          selection = json.loads((root / "run_selection.json").read_text()) if (root / "run_selection.json").exists() else {}
++          manifest = {
++              "schema_version": "1",
++              "artifact_kind": "paper_window_real_data_snapshot",
++              "release_tag": tag,
++              "archive_base": base,
++              "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
++              "selection": selection,
++              "included_files": files,
++              "excluded_by_policy": [
++                  "raw SQLite databases",
++                  "raw per-symbol OHLCV CSV directories",
++                  "broker patch archives",
++                  "runtime caches and local machine files",
++              ],
++              "limitations": [
++                  "Public-market comparable reconstruction only.",
++                  "Does not recover original order book snapshots, prompts, LLM calls, dry-run logs, or execution assumptions.",
++              ],
++          }
++          (root / "snapshot_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
++          PY
++
++          tar -czf "release-artifacts/${base}.tar.gz" -C release-stage "${base}"
++          (cd release-artifacts && sha256sum "${base}.tar.gz" > "${base}.tar.gz.sha256")
++          archive_sha="$(cut -d' ' -f1 "release-artifacts/${base}.tar.gz.sha256")"
++          python - <<PY
++          import json
++          from pathlib import Path
++          base = "${{ inputs.archive_base }}"
++          tag = "${{ inputs.release_tag }}"
++          stage_manifest = json.loads((Path("release-stage") / base / "snapshot_manifest.json").read_text())
++          stage_manifest["archive"] = f"{base}.tar.gz"
++          stage_manifest["archive_sha256"] = "${archive_sha}"
++          stage_manifest["archive_bytes"] = Path("release-artifacts", f"{base}.tar.gz").stat().st_size
++          Path("release-artifacts", f"{base}.manifest.json").write_text(json.dumps(stage_manifest, indent=2, sort_keys=True) + "\n")
++          pointer = {
++              "artifact_kind": "github_release_asset_pointer",
++              "release_tag": tag,
++              "archive": f"{base}.tar.gz",
++              "manifest": f"{base}.manifest.json",
++              "sha256": "${archive_sha}",
++              "selection": stage_manifest.get("selection", {}),
++              "limitations": stage_manifest["limitations"],
++          }
++          Path("release-artifacts", f"{base}.pointer.json").write_text(json.dumps(pointer, indent=2, sort_keys=True) + "\n")
++          PY
++
++      - name: Create or update GitHub Release
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          tag="${{ inputs.release_tag }}"
++          base="${{ inputs.archive_base }}"
++          assets=("release-artifacts/${base}.tar.gz" "release-artifacts/${base}.tar.gz.sha256" "release-artifacts/${base}.manifest.json")
++          if gh release view "${tag}" >/dev/null 2>&1; then
++            if [ "${{ inputs.overwrite_release_assets }}" != "true" ]; then
++              echo "Release ${tag} already exists. Re-run with overwrite_release_assets=true to replace assets."
++              exit 1
++            fi
++            gh release upload "${tag}" "${assets[@]}" --clobber
++          else
++            gh release create "${tag}" "${assets[@]}" --title "Paper-window real-data snapshot" --notes "Retained public-market reconstruction snapshot for the AGENTICAITA paper window."
++          fi
++
++      - name: Upload pointer manifest
++        uses: actions/upload-artifact@v4
++        if: always()
++        with:
++          name: paper-window-snapshot-pointer-${{ github.run_id }}
++          if-no-files-found: warn
++          path: |
++            release-artifacts/${{ inputs.archive_base }}.pointer.json
++            release-artifacts/${{ inputs.archive_base }}.manifest.json
++            release-artifacts/${{ inputs.archive_base }}.tar.gz.sha256
++
++      - name: Write summary
++        if: always()
++        run: |
++          echo "# Paper-window snapshot promotion" >> "$GITHUB_STEP_SUMMARY"
++          echo "Release tag: \`${{ inputs.release_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
++          echo "Archive: \`${{ inputs.archive_base }}.tar.gz\`" >> "$GITHUB_STEP_SUMMARY"
+diff --git a/.github/workflows/verify-paper-window-snapshot.yml b/.github/workflows/verify-paper-window-snapshot.yml
+new file mode 100644
+index 0000000..51e69f0
+--- /dev/null
++++ b/.github/workflows/verify-paper-window-snapshot.yml
+@@ -0,0 +1,56 @@
++name: Verify Paper Window Snapshot
++
++on:
++  workflow_dispatch:
++    inputs:
++      release_tag:
++        description: GitHub Release tag containing the retained snapshot
++        required: true
++        default: paper-window-real-data-20260406-20260411
++      archive_base:
++        description: Base filename for release assets
++        required: true
++        default: paper-window-real-data-20260406-20260411
++
++permissions:
++  contents: read
++
++jobs:
++  verify:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Download release assets
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          gh release download "${{ inputs.release_tag }}" \
++            --pattern "${{ inputs.archive_base }}.tar.gz" \
++            --pattern "${{ inputs.archive_base }}.tar.gz.sha256" \
++            --pattern "${{ inputs.archive_base }}.manifest.json"
++
++      - name: Verify checksum and extract
++        run: |
++          sha256sum -c "${{ inputs.archive_base }}.tar.gz.sha256"
++          mkdir -p retained-snapshot
++          tar -xzf "${{ inputs.archive_base }}.tar.gz" -C retained-snapshot
++          find retained-snapshot -maxdepth 5 -type f | sort
++
++      - name: Validate required snapshot files
++        run: |
++          test -f retained-snapshot/${{ inputs.archive_base }}/snapshot_manifest.json
++          test -f retained-snapshot/${{ inputs.archive_base }}/results_index.jsonl
++          test -f retained-snapshot/${{ inputs.archive_base }}/results_dashboard.html
++          test -f "${{ inputs.archive_base }}.manifest.json"
++
++      - name: Write summary
++        run: |
++          {
++            echo "# Paper-window snapshot verification"
++            echo
++            echo "Release tag: \`${{ inputs.release_tag }}\`"
++            echo "Archive: \`${{ inputs.archive_base }}.tar.gz\`"
++            echo "Checksum verification: passed"
++          } >> "$GITHUB_STEP_SUMMARY"
+diff --git a/docs/artifacts/paper-window-real-data-20260406-20260411.pointer.template.json b/docs/artifacts/paper-window-real-data-20260406-20260411.pointer.template.json
+new file mode 100644
+index 0000000..62cf285
+--- /dev/null
++++ b/docs/artifacts/paper-window-real-data-20260406-20260411.pointer.template.json
+@@ -0,0 +1,20 @@
++{
++  "artifact_kind": "github_release_asset_pointer",
++  "release_tag": "paper-window-real-data-20260406-20260411",
++  "archive": "paper-window-real-data-20260406-20260411.tar.gz",
++  "manifest": "paper-window-real-data-20260406-20260411.manifest.json",
++  "sha256": "<filled-by-promotion-workflow>",
++  "metadata": {
++    "requested_mode": "closest",
++    "chosen_exchange": "<hyperliquid-or-binanceusdm>",
++    "window_start": "2026-04-06T00:00:00Z",
++    "window_end": "2026-04-11T23:59:59Z",
++    "timeframe": "1m",
++    "symbol_limit": "15",
++    "fallback_reason": "<none-or-reason>"
++  },
++  "limitations": [
++    "Public-market comparable reconstruction only.",
++    "Does not recover original order book snapshots, prompts, LLM calls, dry-run logs, or execution assumptions."
++  ]
++}
+diff --git a/docs/paper_window_snapshot_release_workflow.md b/docs/paper_window_snapshot_release_workflow.md
+new file mode 100644
+index 0000000..3b73312
+--- /dev/null
++++ b/docs/paper_window_snapshot_release_workflow.md
+@@ -0,0 +1,61 @@
++# Paper-Window Snapshot Release Workflow
++
++This repository keeps raw market data and full generated run outputs out of git. Retained real-data snapshots should be stored as GitHub Release assets, with only a compact pointer manifest and curated documentation committed to the repository.
++
++## Recommended flow
++
++1. Run the manual paper-window real-data workflow and inspect its temporary Actions artefact.
++2. Promote the selected successful Actions artefact with `Promote Paper Window Snapshot`.
++3. Future workflows use `Verify Paper Window Snapshot` or the same download commands to retrieve and verify the retained snapshot.
++
++## Release asset shape
++
++Recommended release tag:
++
++```text
++paper-window-real-data-20260406-20260411
++```
++
++Recommended assets:
++
++```text
++paper-window-real-data-20260406-20260411.tar.gz
++paper-window-real-data-20260406-20260411.tar.gz.sha256
++paper-window-real-data-20260406-20260411.manifest.json
++```
++
++The archive contains coverage reports, complete-symbol lists, run manifests, replication summaries, quality reports, result indexes, dashboard output, diagnostic logs, and optionally the exported `replication_input_ohlcv.csv`.
++
++The archive does not include raw SQLite databases, raw per-symbol OHLCV directories, broker archives, caches, bytecode, or local machine files.
++
++## Promotion workflow
++
++Run `Promote Paper Window Snapshot` manually with:
++
++- the workflow run id that produced the temporary paper-window artefact;
++- optionally the exact artefact name;
++- the release tag;
++- whether to include `replication_input_ohlcv.csv`;
++- whether to overwrite release assets.
++
++The workflow downloads the selected Actions artefact, packages the retained subset, writes a checksum, writes a release manifest, uploads release assets, and uploads a pointer manifest as a workflow artefact.
++
++## Consumer workflow
++
++Run `Verify Paper Window Snapshot` to confirm the release asset can be downloaded, checksum-verified, and extracted by GitHub Actions.
++
++Equivalent shell commands:
++
++```bash
++gh release download paper-window-real-data-20260406-20260411 \
++  --pattern 'paper-window-real-data-20260406-20260411.tar.gz' \
++  --pattern 'paper-window-real-data-20260406-20260411.tar.gz.sha256' \
++  --pattern 'paper-window-real-data-20260406-20260411.manifest.json'
++
++sha256sum -c paper-window-real-data-20260406-20260411.tar.gz.sha256
++tar -xzf paper-window-real-data-20260406-20260411.tar.gz
++```
++
++## Interpretation limits
++
++This retained snapshot is a public-market comparable reconstruction. It does not recover the original order book snapshots, prompts, LLM calls, agent deliberations, risk-manager approvals, dry-run SQLite records, or execution assumptions.
