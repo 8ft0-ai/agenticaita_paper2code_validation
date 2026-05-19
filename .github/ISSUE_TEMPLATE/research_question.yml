@@ -1,0 +1,41 @@
+name: Research question
+description: Track an exploratory question before it becomes an implementation task.
+title: "[Research]: "
+labels:
+  - needs-triage
+  - area:research
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question
+      description: What decision or uncertainty needs investigation?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why does this matter to validation, replication, data, docs, or automation?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence_needed
+    attributes:
+      label: Evidence needed
+      description: What sources, data, experiments, or examples would answer the question?
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision enabled
+      description: What implementation or planning decision will this research unlock?
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+    validations:
+      required: true
