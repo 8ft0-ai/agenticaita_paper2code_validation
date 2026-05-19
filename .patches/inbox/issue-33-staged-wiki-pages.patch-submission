@@ -1,0 +1,220 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 33,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-33-staged-wiki-pages",
+  "commit_message": "Stage wiki methodology pages",
+  "pr_title": "Stage Wiki replication methodology pages",
+  "pr_body": "Addresses #33\n\n## Summary\n\nStages the proposed Wiki pages as committed Markdown source so the enabled repository Wiki can be initialised from reviewed documentation once the wiki repository is available.\n\n## Changes\n\n- Adds staged Wiki source pages for Home, Replication Methodology, Real-Data Replication Runbook, Evidence Ledger, and Artifact Requirements.\n- Links the staged pages back to repository documentation and the tracking issue.\n- Keeps the content derived from committed docs and runbooks rather than generated local artefacts.\n\n## Validation\n\n- `git apply --check /tmp/issue33.diff` on the exact unified diff in a clean temporary git worktree.\n- Documentation-only change; no market-data, replication, or validation CLIs were run.\n\n## Limitation\n\nThis does not fully close #33 because the GitHub Wiki repository is not initialised or accessible through the current connector context.",
+  "validation": [
+    "git apply --check /tmp/issue33.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation-only change; no generated market data, validation outputs, or replication artefacts created."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/wiki/Artifact-Requirements.md b/docs/wiki/Artifact-Requirements.md
+new file mode 100644
+index 0000000..cb0d612
+--- /dev/null
++++ b/docs/wiki/Artifact-Requirements.md
+@@ -0,0 +1,26 @@
++# Artifact Requirements
++
++This page summarises which artefacts are needed for stronger reproduction claims.
++
++## Artefacts available from public workflows
++
++- OHLCV candles for supported public venues and symbols.
++- Funding-rate history where the exchange exposes it through CCXT.
++- Coverage reports, manifests, and SQLite candle stores generated locally.
++- Functional replication outputs: `pipeline_log.csv`, `trades.csv`, `vol_history.csv`, `summary.json`, `replication_report.md`, and SQLite audit tables.
++
++These files are generated artefacts and should remain outside git unless converted into a curated documentation summary.
++
++## Artefacts required from the paper authors
++
++- Original L2 order book snapshots.
++- Original prompts, model calls, agent messages, and judge/risk-manager outputs.
++- Original dry-run SQLite database and trade provenance.
++- Original exchange fill, slippage, and execution assumptions.
++- Any unreleased configuration needed to reproduce the exact five-day run.
++
++Without these artefacts, the repository can provide static audit, functional replication, and comparable public-data reconstruction, but not an exact empirical reproduction of the original run.
++
++## Repository policy
++
++Use `docs/artifact_retention_policy.md` as the source of truth for what stays local, what may be committed, and what should be stored externally.
+diff --git a/docs/wiki/Evidence-Ledger.md b/docs/wiki/Evidence-Ledger.md
+new file mode 100644
+index 0000000..6767550
+--- /dev/null
++++ b/docs/wiki/Evidence-Ledger.md
+@@ -0,0 +1,18 @@
++# Evidence Ledger
++
++This page records the evidence levels used by the repository when assessing AGENTICAITA claims.
++
++| Evidence level | Meaning | Repository location |
++| --- | --- | --- |
++| Static audit | Reported quantities are checked for internal consistency. | `validation/` |
++| Functional replication | The published architecture is approximated and executed in an auditable dry-run harness. | `replication/` |
++| Empirical public-data reconstruction | Public market data is fetched and used for comparable market-condition checks. | `scripts/fetch_hyperliquid_ohlcv.py`, `scripts/run_real_data_replication.py` |
++| Author artefacts required | A claim depends on unreleased prompts, LLM calls, order books, trade logs, or SQLite records. | Tracked in validation reports and issue discussions. |
++
++## Current public-data limitation
++
++The documented Hyperliquid paper-window attempt returned funding rows for the requested symbols but no OHLCV candles. The repository therefore uses Binance USD-M as a CCXT-compatible public perpetual-futures fallback for comparable market-condition checks. The fallback does not reproduce the paper's exact venue, liquidity, order-book state, or original dry-run decisions.
++
++## Evidence handling rule
++
++Do not upgrade a result from functional replication to empirical replication unless the run uses documented market data, passes quality checks, and clearly states its remaining limitations.
+diff --git a/docs/wiki/Home.md b/docs/wiki/Home.md
+new file mode 100644
+index 0000000..64e5315
+--- /dev/null
++++ b/docs/wiki/Home.md
+@@ -0,0 +1,25 @@
++# AGENTICAITA Replication Wiki
++
++This page is the staged Home page for the repository Wiki. It is derived from committed repository documentation and should be copied to the enabled GitHub Wiki once the wiki git repository is available.
++
++## Pages
++
++- [Replication Methodology](Replication-Methodology)
++- [Real-Data Replication Runbook](Real-Data-Replication-Runbook)
++- [Evidence Ledger](Evidence-Ledger)
++- [Artifact Requirements](Artifact-Requirements)
++
++## Repository links
++
++- Repository: https://github.com/8ft0-ai/agenticaita_paper2code_validation
++- README: https://github.com/8ft0-ai/agenticaita_paper2code_validation/blob/main/README.md
++- Artifact retention policy: https://github.com/8ft0-ai/agenticaita_paper2code_validation/blob/main/docs/artifact_retention_policy.md
++- Real-data workflow runbook: https://github.com/8ft0-ai/agenticaita_paper2code_validation/blob/main/docs/real_data_replication_workflow.md
++- Replication quality checks: https://github.com/8ft0-ai/agenticaita_paper2code_validation/blob/main/docs/replication_quality_checks.md
++- Wiki tracking issue: https://github.com/8ft0-ai/agenticaita_paper2code_validation/issues/33
++
++## Scope
++
++The project contains two complementary validation paths. `validation/` checks whether reported paper quantities are internally consistent and flags unsupported claims. `replication/` runs a functional dry-run approximation of the published architecture and produces comparable artefacts from supplied market data.
++
++Public APIs can reconstruct some market-condition inputs, but they cannot recover the original order book snapshots, prompts, LLM calls, risk-manager approvals, SQLite dry-run logs, or exact trade path without author artefacts.
+diff --git a/docs/wiki/Real-Data-Replication-Runbook.md b/docs/wiki/Real-Data-Replication-Runbook.md
+new file mode 100644
+index 0000000..dfc07a4
+--- /dev/null
++++ b/docs/wiki/Real-Data-Replication-Runbook.md
+@@ -0,0 +1,56 @@
++# Real-Data Replication Runbook
++
++This page stages the Wiki version of the public-market replication workflow.
++
++## Install dependencies
++
++```bash
++pip install -r requirements.txt
++```
++
++## Baseline workflow
++
++Run the 15-symbol baseline subset against Binance USD-M fallback data:
++
++```bash
++python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm
++```
++
++The script performs three stages:
++
++1. fetch public one-minute OHLCV and available funding history;
++2. export complete SQLite candle coverage to replication input CSV;
++3. run the functional replication harness with `replication/config.yaml`.
++
++## Larger universe workflow
++
++```bash
++python scripts/run_real_data_replication.py --profile large --exchange binanceusdm --symbol-limit 76
++```
++
++The large profile can take substantially longer because it may fetch many active markets before selecting complete symbols.
++
++## Existing database workflow
++
++```bash
++python scripts/run_real_data_replication.py \
++  --skip-fetch \
++  --skip-replication \
++  --market-db data/binanceusdm_ohlcv_real_subset/market_data.sqlite \
++  --replication-input data/binanceusdm_ohlcv_real_subset/replication_input_ohlcv.csv
++```
++
++## Quality checks
++
++```bash
++python scripts/check_replication_quality.py \
++  --input-csv data/binanceusdm_ohlcv_real_subset/replication_input_ohlcv.csv \
++  --results-dir replication/results_real_binanceusdm_real_subset \
++  --real-data
++```
++
++The checker fails malformed input and empty real-data pipeline logs. Empty trades are warnings, not failures.
++
++## Output retention
++
++Generated data, SQLite stores, exported CSVs, replication result directories, and coverage reports remain local artefacts unless they are deliberately promoted into reviewed documentation under `docs/`.
+diff --git a/docs/wiki/Replication-Methodology.md b/docs/wiki/Replication-Methodology.md
+new file mode 100644
+index 0000000..d52fe3f
+--- /dev/null
++++ b/docs/wiki/Replication-Methodology.md
+@@ -0,0 +1,47 @@
++# Replication Methodology
++
++This page summarises how the repository separates static validation, functional replication, and empirical reconstruction.
++
++## Validation path
++
++The `validation/` path checks claims that can be tested from reported paper quantities. It covers arithmetic consistency, summary statistics, cost scenarios, binomial checks, CBD properties, and explicit unsupported markers for claims requiring unavailable raw artefacts.
++
++Primary command:
++
++```bash
++cd validation
++python validate_claims.py --out results
++```
++
++## Functional replication path
++
++The `replication/` path runs an auditable dry-run approximation of the paper architecture. It includes AZTE triggers, CBD scoring, a sequential Analyst to Risk Manager to Executor pipeline, deterministic risk gates, IGP cooldowns, SQLite audit tables, and transaction-cost sensitivity.
++
++Primary command:
++
++```bash
++python replication/replicate.py --config replication/config.yaml
++```
++
++## Real-data reconstruction path
++
++The real-data path starts from public CCXT-compatible market data, exports complete candle coverage into a replication input CSV, and then runs the replication harness.
++
++Primary command:
++
++```bash
++python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm
++```
++
++Use the quality checker before interpreting generated outputs:
++
++```bash
++python scripts/check_replication_quality.py \
++  --input-csv data/binanceusdm_ohlcv_real_subset/replication_input_ohlcv.csv \
++  --results-dir replication/results_real_binanceusdm_real_subset \
++  --real-data
++```
++
++## Interpretation rule
++
++A successful functional or real-data run does not prove the original live dry-run. It shows whether the documented architecture can be executed and whether comparable public market-condition checks are internally coherent.
