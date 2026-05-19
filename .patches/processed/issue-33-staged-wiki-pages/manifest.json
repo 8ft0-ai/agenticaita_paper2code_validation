@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Stage wiki methodology pages",
+  "implementation_branch": "ai/issue-33-staged-wiki-pages",
+  "issue_number": 33,
+  "pr_body": "Addresses #33\n\n## Summary\n\nStages the proposed Wiki pages as committed Markdown source so the enabled repository Wiki can be initialised from reviewed documentation once the wiki repository is available.\n\n## Changes\n\n- Adds staged Wiki source pages for Home, Replication Methodology, Real-Data Replication Runbook, Evidence Ledger, and Artifact Requirements.\n- Links the staged pages back to repository documentation and the tracking issue.\n- Keeps the content derived from committed docs and runbooks rather than generated local artefacts.\n\n## Validation\n\n- `git apply --check /tmp/issue33.diff` on the exact unified diff in a clean temporary git worktree.\n- Documentation-only change; no market-data, replication, or validation CLIs were run.\n\n## Limitation\n\nThis does not fully close #33 because the GitHub Wiki repository is not initialised or accessible through the current connector context.",
+  "pr_title": "Stage Wiki replication methodology pages",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue33.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation-only change; no generated market data, validation outputs, or replication artefacts created."
+  ]
+}
