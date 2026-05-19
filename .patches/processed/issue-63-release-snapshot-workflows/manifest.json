@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add retained snapshot release workflows",
+  "implementation_branch": "ai/issue-63-release-snapshot-workflows",
+  "issue_number": 63,
+  "pr_body": "Closes #63\n\n## Summary\n\nImplements the retained external artefact plan using GitHub Release assets for long-lived paper-window snapshots and Actions artefacts for temporary per-run evidence.\n\n## Changes\n\n- Adds a manual promotion workflow that downloads a selected Actions artefact, packages the retained subset, computes a checksum, creates or updates a GitHub Release, and uploads release assets.\n- Adds a manual verification workflow that downloads the release asset, verifies the checksum, extracts the archive, and checks required files.\n- Adds a pointer manifest template under `docs/artifacts/`.\n- Documents the workflow, release asset shape, download commands, and interpretation limits.\n\n## Validation\n\n- `git apply --check /tmp/issue63-release-snapshot-workflows.patch` in a clean temporary git worktree.\n- Static review of workflow permissions, shell steps, release commands, and retained artefact filters.\n- Live promotion was not run because it requires a successful source Actions artefact containing the real-data snapshot.",
+  "pr_title": "Add retained paper-window snapshot release workflows",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue63-release-snapshot-workflows.patch in a clean temporary git worktree.",
+    "Static review of workflow permissions, shell steps, release commands, and retained artefact filters.",
+    "Live promotion not run because it requires a successful source Actions artefact containing the real-data snapshot."
+  ]
+}
