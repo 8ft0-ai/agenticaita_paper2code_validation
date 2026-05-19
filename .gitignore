@@ -228,3 +228,5 @@ real_data_validation_results.*
 real_data_validation_report.md
 .DS_Store
 .patches/
+results_index.jsonl
+results_index.md
