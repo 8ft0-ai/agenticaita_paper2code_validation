@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add local results dashboard",
+  "implementation_branch": "ai/issue-55-results-dashboard",
+  "issue_number": 55,
+  "pr_body": "Closes #55\n\n## Summary\n\nAdds a lightweight static HTML dashboard for reviewing local validation, market-data, quality-check, and replication run indexes.\n\n## Changes\n\n- Adds `scripts/render_results_dashboard.py` to render `results_index.jsonl` as a self-contained HTML dashboard.\n- Adds status cards, scenario-grouped tables, local artefact links, and simple visual summaries for status counts, symbol coverage, trade count, and net PnL.\n- Adds `docs/run_results_dashboard.md` with local usage and retention guidance.\n- Adds `.gitignore` coverage for generated dashboard files.\n- Adds tests covering grouped sections, artefact links, visual summaries, missing optional metrics, and invalid JSONL lines.\n\n## Validation\n\n- `git apply --check /tmp/issue55.patch` in a clean temporary git worktree.\n- `python -m py_compile scripts/render_results_dashboard.py tests/test_render_results_dashboard.py` on staged file contents.\n- Full market-data, validation, and replication CLIs were not run because this change adds local dashboard tooling and tests only.",
+  "pr_title": "Render local HTML dashboard for run results",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue55.patch in a clean temporary git worktree.",
+    "python -m py_compile scripts/render_results_dashboard.py tests/test_render_results_dashboard.py on staged file contents.",
+    "Full market-data, validation, and replication CLIs were not run because this change adds local dashboard tooling and tests only."
+  ]
+}

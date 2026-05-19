@@ -1,0 +1,376 @@
+diff --git a/.gitignore b/.gitignore
+index d6c70d7..2e8213f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -229,3 +229,4 @@ real_data_validation_report.md
+ .patches/
+ results_index.jsonl
+ results_index.md
++results_dashboard.html
+diff --git a/docs/run_results_dashboard.md b/docs/run_results_dashboard.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/run_results_dashboard.md
+@@ -0,0 +1,37 @@
++# Run Results Dashboard
++
++`results_dashboard.html` is a local, static HTML view over `results_index.jsonl`. It is intended for quickly reviewing validation, market-data, quality-check, and replication runs without committing raw generated artefacts.
++
++## Usage
++
++Generate an index first:
++
++```bash
++python scripts/index_run_results.py \
++  --runs validation/results* replication/results* data/*_ohlcv* \
++  --out-jsonl results_index.jsonl \
++  --out-md results_index.md
++```
++
++Render the dashboard:
++
++```bash
++python scripts/render_results_dashboard.py \
++  --index results_index.jsonl \
++  --out results_dashboard.html
++```
++
++Open `results_dashboard.html` in a browser. The dashboard is self-contained and does not require network access.
++
++## Dashboard contents
++
++The dashboard includes:
++
++- summary cards for pass, warning, fail, and unknown statuses;
++- grouped run tables for static validation, real-data validation, market-data coverage, replication, quality checks, and unknown entries;
++- local links to discovered artefacts such as validation reports, coverage reports, `summary.json`, replication reports, and quality-check output;
++- simple visual summaries for status counts, symbol coverage, trade count, and net PnL where those metrics are present.
++
++## Retention
++
++The dashboard is generated output and remains local by default. Do not commit `results_dashboard.html` unless a specific result is deliberately promoted into curated documentation under `docs/`.
+diff --git a/scripts/render_results_dashboard.py b/scripts/render_results_dashboard.py
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/scripts/render_results_dashboard.py
+@@ -0,0 +1,226 @@
++#!/usr/bin/env python3
++"""Render a static local HTML dashboard from results_index.jsonl."""
++from __future__ import annotations
++
++import argparse
++import html
++import json
++from collections import Counter, defaultdict
++from pathlib import Path
++from typing import Any
++from urllib.parse import quote
++
++SCENARIO_LABELS = {
++    "static_validation": "Static validation",
++    "real_data_validation": "Real-data validation",
++    "market_data_coverage": "Market-data coverage",
++    "replication": "Replication",
++    "quality_check": "Quality checks",
++    "unknown": "Unknown",
++}
++
++
++def esc(value: Any) -> str:
++    return html.escape("" if value is None else str(value), quote=True)
++
++
++def get_dict(row: dict[str, Any], key: str) -> dict[str, Any]:
++    value = row.get(key)
++    return value if isinstance(value, dict) else {}
++
++
++def get_list(row: dict[str, Any], key: str) -> list[Any]:
++    value = row.get(key)
++    return value if isinstance(value, list) else []
++
++
++def metric(row: dict[str, Any], *names: str) -> Any:
++    metrics = get_dict(row, "metrics")
++    data = get_dict(row, "data")
++    for name in names:
++        if metrics.get(name) is not None:
++            return metrics[name]
++        if data.get(name) is not None:
++            return data[name]
++    return None
++
++
++def scenario_label(scenario: Any) -> str:
++    key = str(scenario or "unknown")
++    return SCENARIO_LABELS.get(key, key.replace("_", " ").title())
++
++
++def status_class(status: Any) -> str:
++    key = str(status or "unknown").lower()
++    return key if key in {"pass", "warning", "fail", "unknown"} else "unknown"
++
++
++def warning_row(source: Path, message: str) -> dict[str, Any]:
++    return {
++        "schema_version": "1",
++        "run_id": source.name,
++        "scenario": "unknown",
++        "status": "warning",
++        "quality_status": "unknown",
++        "data": {},
++        "metrics": {},
++        "warnings": [message],
++        "artefacts": {},
++    }
++
++
++def read_index(path: Path) -> list[dict[str, Any]]:
++    rows: list[dict[str, Any]] = []
++    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
++        if not line.strip():
++            continue
++        try:
++            row = json.loads(line)
++        except json.JSONDecodeError as exc:
++            rows.append(warning_row(path, f"invalid JSONL line {line_number}: {exc}"))
++            continue
++        rows.append(row if isinstance(row, dict) else warning_row(path, f"line {line_number} is not a JSON object"))
++    return rows
++
++
++def bar(value: float, maximum: float, label: str) -> str:
++    width = 0.0 if maximum <= 0 else max(0.0, min(100.0, value / maximum * 100.0))
++    return f'<div class="bar"><span style="width:{width:.1f}%"></span><b>{esc(label)}</b></div>'
++
++
++def status_cards(rows: list[dict[str, Any]]) -> str:
++    counts = Counter(status_class(row.get("status")) for row in rows)
++    return "\n".join(
++        f'<section class="card {key}"><small>{label}</small><strong>{counts.get(key, 0)}</strong></section>'
++        for key, label in [("pass", "Pass"), ("warning", "Warning"), ("fail", "Fail"), ("unknown", "Unknown")]
++    )
++
++
++def status_summary(rows: list[dict[str, Any]]) -> str:
++    counts = Counter(status_class(row.get("status")) for row in rows)
++    maximum = max(counts.values(), default=1)
++    return "<h2>Status summary</h2>" + "\n".join(bar(counts.get(key, 0), maximum, f"{key}: {counts.get(key, 0)}") for key in ("pass", "warning", "fail", "unknown"))
++
++
++def symbol_summary(rows: list[dict[str, Any]]) -> str:
++    values: list[tuple[dict[str, Any], Any, Any]] = []
++    for row in rows:
++        total = metric(row, "symbol_count", "asset_count", "symbols_requested")
++        complete = metric(row, "complete_symbols", "symbols_complete")
++        if total is not None or complete is not None:
++            values.append((row, complete, total))
++    if not values:
++        return "<h2>Symbol coverage</h2><p>No symbol coverage metrics were present.</p>"
++    maximum = max(float(total or complete or 0) for _, complete, total in values) or 1.0
++    lines = ["<h2>Symbol coverage</h2>"]
++    for row, complete, total in values:
++        lines.append(bar(float(complete or total or 0), maximum, f"{row.get('run_id')}: {complete if complete is not None else '?'} / {total if total is not None else '?'}"))
++    return "\n".join(lines)
++
++
++def trade_summary(rows: list[dict[str, Any]]) -> str:
++    trade_rows = [row for row in rows if metric(row, "trade_count") is not None or metric(row, "net_pnl_usd", "total_pnl_usd") is not None]
++    if not trade_rows:
++        return "<h2>Trade and PnL summary</h2><p>No trade or PnL metrics were present.</p>"
++    lines = ["<h2>Trade and PnL summary</h2>", "<table><tr><th>Run</th><th>Scenario</th><th>Trades</th><th>Net PnL</th></tr>"]
++    for row in trade_rows:
++        lines.append(
++            f"<tr><td>{esc(row.get('run_id'))}</td><td>{esc(scenario_label(row.get('scenario')))}</td>"
++            f"<td>{esc(metric(row, 'trade_count'))}</td><td>{esc(metric(row, 'net_pnl_usd', 'total_pnl_usd'))}</td></tr>"
++        )
++    lines.append("</table>")
++    return "\n".join(lines)
++
++
++def href(path: Any) -> str:
++    return quote(str(path), safe="/:._-#?=&%")
++
++
++def artefacts(row: dict[str, Any]) -> str:
++    links = []
++    for key, path in sorted(get_dict(row, "artefacts").items()):
++        links.append(f'<a href="{esc(href(path))}">{esc(key)}</a>')
++    return ", ".join(links)
++
++
++def window_text(row: dict[str, Any]) -> str:
++    data = get_dict(row, "data")
++    start = data.get("start_timestamp") or data.get("start") or data.get("window_start")
++    end = data.get("end_timestamp") or data.get("end") or data.get("window_end")
++    return f"{start or ''} -> {end or ''}" if start or end else ""
++
++
++def symbols_text(row: dict[str, Any]) -> str:
++    total = metric(row, "symbol_count", "asset_count", "symbols_requested")
++    complete = metric(row, "complete_symbols", "symbols_complete")
++    if total is not None and complete is not None:
++        return f"{complete}/{total}"
++    return "" if total is None else str(total)
++
++
++def run_table(rows: list[dict[str, Any]]) -> str:
++    lines = ["<table><tr><th>Run</th><th>Status</th><th>Quality</th><th>Commit</th><th>Window</th><th>Symbols</th><th>Trades</th><th>Net PnL</th><th>Warnings</th><th>Artefacts</th></tr>"]
++    for row in rows:
++        status = status_class(row.get("status"))
++        quality = status_class(row.get("quality_status"))
++        commit = str(row.get("commit_sha") or "")[:8]
++        warnings = "; ".join(str(item) for item in get_list(row, "warnings"))
++        lines.append(
++            f"<tr><td>{esc(row.get('run_id'))}</td><td><span class=\"pill {status}\">{esc(row.get('status') or 'unknown')}</span></td>"
++            f"<td><span class=\"pill {quality}\">{esc(row.get('quality_status') or 'unknown')}</span></td><td>{esc(commit)}</td>"
++            f"<td>{esc(window_text(row))}</td><td>{esc(symbols_text(row))}</td><td>{esc(metric(row, 'trade_count'))}</td>"
++            f"<td>{esc(metric(row, 'net_pnl_usd', 'total_pnl_usd'))}</td><td>{esc(warnings)}</td><td>{artefacts(row)}</td></tr>"
++        )
++    lines.append("</table>")
++    return "\n".join(lines)
++
++
++def grouped_tables(rows: list[dict[str, Any]]) -> str:
++    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
++    for row in rows:
++        groups[str(row.get("scenario") or "unknown")].append(row)
++    order = ["static_validation", "real_data_validation", "market_data_coverage", "replication", "quality_check", "unknown"]
++    lines: list[str] = []
++    for scenario in order + sorted(set(groups) - set(order)):
++        if scenario in groups:
++            lines.append(f"<h2>{esc(scenario_label(scenario))}</h2>")
++            lines.append(run_table(groups[scenario]))
++    return "\n".join(lines)
++
++
++def render(rows: list[dict[str, Any]], source: Path) -> str:
++    css = """
++body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:2rem;background:#f6f8fa;color:#1f2328}
++.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:1rem}.card,.panel{background:white;border:1px solid #d0d7de;border-radius:.75rem;padding:1rem;margin:1rem 0}.card small{display:block;color:#57606a}.card strong{font-size:2rem}.pass{border-color:#1a7f37}.warning{border-color:#bf8700}.fail{border-color:#cf222e}.unknown{border-color:#57606a}
++table{border-collapse:collapse;width:100%;font-size:.92rem}th,td{border-bottom:1px solid #d8dee4;padding:.55rem;text-align:left;vertical-align:top}th{background:#f6f8fa}.pill{border-radius:999px;padding:.15rem .5rem;font-weight:600}.pill.pass{background:#dafbe1}.pill.warning{background:#fff8c5}.pill.fail{background:#ffebe9}.pill.unknown{background:#eaeef2}.bar{position:relative;background:#eaeef2;border-radius:.4rem;min-height:1.8rem;margin:.5rem 0;overflow:hidden}.bar span{position:absolute;inset:0 auto 0 0;background:#0969da}.bar b{position:relative;display:inline-block;padding:.35rem .5rem}
++"""
++    return f"""<!doctype html>
++<html lang="en">
++<head><meta charset="utf-8"><title>Run Results Dashboard</title><style>{css}</style></head>
++<body>
++<header><h1>Run Results Dashboard</h1><p>Generated from <code>{esc(source)}</code>. This is a local generated artefact.</p></header>
++<div class="grid">{status_cards(rows)}</div>
++<section class="panel">{status_summary(rows)}</section>
++<section class="panel">{symbol_summary(rows)}</section>
++<section class="panel">{trade_summary(rows)}</section>
++<section class="panel"><h2>Runs by scenario</h2>{grouped_tables(rows)}</section>
++</body></html>
++"""
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--index", required=True, help="results_index.jsonl path")
++    parser.add_argument("--out", default="results_dashboard.html", help="HTML dashboard output path")
++    args = parser.parse_args(argv)
++    index_path = Path(args.index)
++    rows = read_index(index_path)
++    out_path = Path(args.out)
++    out_path.parent.mkdir(parents=True, exist_ok=True)
++    out_path.write_text(render(rows, index_path), encoding="utf-8")
++    print(f"rendered {len(rows)} run(s) to {out_path}")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/test_render_results_dashboard.py b/tests/test_render_results_dashboard.py
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/tests/test_render_results_dashboard.py
+@@ -0,0 +1,86 @@
++from __future__ import annotations
++
++import json
++import subprocess
++import sys
++from pathlib import Path
++
++
++def render_dashboard(tmp_path: Path, rows: list[dict]) -> str:
++    root = Path(__file__).resolve().parents[1]
++    index = tmp_path / "results_index.jsonl"
++    output = tmp_path / "results_dashboard.html"
++    index.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
++    result = subprocess.run(
++        [sys.executable, "scripts/render_results_dashboard.py", "--index", str(index), "--out", str(output)],
++        cwd=root,
++        check=True,
++        capture_output=True,
++        text=True,
++    )
++    assert "rendered" in result.stdout
++    return output.read_text(encoding="utf-8")
++
++
++def test_dashboard_renders_summary_cards_and_grouped_sections(tmp_path: Path) -> None:
++    html = render_dashboard(
++        tmp_path,
++        [
++            {"run_id": "validation-results", "scenario": "static_validation", "status": "warning", "quality_status": "not_run", "metrics": {"status_counts": {"pass": 2, "unsupported": 1}}, "artefacts": {"report": "validation/results/validation_report.md"}, "warnings": ["unsupported results present: 1"]},
++            {"run_id": "replication-real", "scenario": "replication", "status": "pass", "quality_status": "pass", "data": {"asset_count": 15}, "metrics": {"trade_count": 4, "net_pnl_usd": 8.25}, "artefacts": {"summary_json": "replication/results/summary.json", "replication_report": "replication/results/replication_report.md"}, "warnings": []},
++        ],
++    )
++
++    assert "Run Results Dashboard" in html
++    assert "Static validation" in html
++    assert "Replication" in html
++    assert "validation_report.md" in html
++    assert "replication_report.md" in html
++    assert "warning" in html
++    assert "pass" in html
++
++
++def test_dashboard_includes_visual_summaries_for_status_symbols_and_trades(tmp_path: Path) -> None:
++    html = render_dashboard(
++        tmp_path,
++        [
++            {"run_id": "coverage", "scenario": "market_data_coverage", "status": "warning", "quality_status": "not_run", "metrics": {"symbol_count": 15, "complete_symbols": 12}, "warnings": ["incomplete symbols: 3"], "artefacts": {"coverage_report": "data/run/coverage_report.md"}},
++            {"run_id": "replication", "scenario": "replication", "status": "pass", "quality_status": "pass", "metrics": {"trade_count": 7, "net_pnl_usd": -3.5}, "warnings": [], "artefacts": {}},
++        ],
++    )
++
++    assert "Status summary" in html
++    assert "Symbol coverage" in html
++    assert "coverage: 12 / 15" in html
++    assert "Trade and PnL summary" in html
++    assert "-3.5" in html
++
++
++def test_dashboard_handles_missing_optional_metrics(tmp_path: Path) -> None:
++    html = render_dashboard(
++        tmp_path,
++        [{"run_id": "minimal", "scenario": "quality_check", "status": "unknown", "quality_status": "unknown", "warnings": [], "artefacts": {}}],
++    )
++
++    assert "Quality checks" in html
++    assert "No symbol coverage metrics were present." in html
++    assert "No trade or PnL metrics were present." in html
++
++
++def test_dashboard_represents_invalid_jsonl_line_as_warning(tmp_path: Path) -> None:
++    root = Path(__file__).resolve().parents[1]
++    index = tmp_path / "results_index.jsonl"
++    output = tmp_path / "results_dashboard.html"
++    index.write_text("{not valid json\n", encoding="utf-8")
++
++    subprocess.run(
++        [sys.executable, "scripts/render_results_dashboard.py", "--index", str(index), "--out", str(output)],
++        cwd=root,
++        check=True,
++        capture_output=True,
++        text=True,
++    )
++
++    html = output.read_text(encoding="utf-8")
++    assert "invalid JSONL line 1" in html
++    assert "Unknown" in html
