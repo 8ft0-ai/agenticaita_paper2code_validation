@@ -1,0 +1,359 @@
+diff --git a/.github/workflows/results-surface.yml b/.github/workflows/results-surface.yml
+new file mode 100644
+index 0000000..41a5819
+--- /dev/null
++++ b/.github/workflows/results-surface.yml
+@@ -0,0 +1,102 @@
++name: Results Surface Smoke
++
++on:
++  workflow_dispatch:
++  pull_request:
++    paths:
++      - ".github/workflows/results-surface.yml"
++      - "docs/**"
++      - "replication/**"
++      - "scripts/**"
++      - "tests/**"
++      - "validation/**"
++
++permissions:
++  contents: read
++
++jobs:
++  results-surface:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: "3.11"
++
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          pip install -r requirements.txt
++
++      - name: Run validation and replication smoke checks
++        shell: bash
++        run: |
++          set +e
++          validation_status=0
++          replication_status=0
++
++          (
++            cd validation
++            python validate_claims.py --out results
++          ) || validation_status=$?
++
++          if [ -d validation/results ]; then
++            python scripts/build_run_manifest.py \
++              --run-dir validation/results \
++              --scenario static_validation \
++              --commit-sha "${GITHUB_SHA}" \
++              --command "cd validation && python validate_claims.py --out results" \
++              --out validation/results/run_manifest.json \
++              --base-dir .
++          fi
++
++          python replication/replicate.py \
++            --config replication/config.yaml \
++            --out replication/results_ci_synthetic || replication_status=$?
++
++          if [ -d replication/results_ci_synthetic ]; then
++            python scripts/build_run_manifest.py \
++              --run-dir replication/results_ci_synthetic \
++              --scenario replication \
++              --commit-sha "${GITHUB_SHA}" \
++              --command "python replication/replicate.py --config replication/config.yaml --out replication/results_ci_synthetic" \
++              --out replication/results_ci_synthetic/run_manifest.json \
++              --base-dir .
++          fi
++
++          python scripts/index_run_results.py \
++            --runs validation/results replication/results_ci_synthetic \
++            --out-jsonl results_index.jsonl \
++            --out-md results_index.md
++          python scripts/render_results_dashboard.py \
++            --index results_index.jsonl \
++            --out results_dashboard.html
++          python scripts/write_github_step_summary.py \
++            --index results_index.jsonl \
++            --summary-file results_index.md \
++            --dashboard results_dashboard.html
++
++          if [ "$validation_status" -ne 0 ] || [ "$replication_status" -ne 0 ]; then
++            exit 1
++          fi
++
++      - name: Upload run result artefacts
++        uses: actions/upload-artifact@v4
++        if: always()
++        with:
++          name: run-results-${{ github.run_id }}
++          if-no-files-found: warn
++          path: |
++            validation/results/run_manifest.json
++            validation/results/validation_report.md
++            validation/results/validation_results.json
++            validation/results/validation_results.csv
++            replication/results_ci_synthetic/run_manifest.json
++            replication/results_ci_synthetic/summary.json
++            replication/results_ci_synthetic/replication_report.md
++            results_index.jsonl
++            results_index.md
++            results_dashboard.html
+diff --git a/docs/github_actions_results_surface.md b/docs/github_actions_results_surface.md
+new file mode 100644
+index 0000000..0ef91ee
+--- /dev/null
++++ b/docs/github_actions_results_surface.md
+@@ -0,0 +1,38 @@
++# GitHub Actions Results Surface
++
++The `Results Surface Smoke` workflow exposes automated validation and deterministic replication smoke-run results directly in GitHub Actions.
++
++## Where to view results
++
++Open the workflow run and inspect the job summary. The summary includes status counts, one row per indexed run, key metrics, warnings, and generated artefact names.
++
++The workflow also uploads a `run-results-<run-id>` artefact. Download it from the workflow run's **Artifacts** section to inspect:
++
++- `run_manifest.json` files;
++- validation reports and JSON/CSV results;
++- deterministic replication `summary.json` and `replication_report.md`;
++- `results_index.jsonl`;
++- `results_index.md`;
++- `results_dashboard.html`.
++
++## Raw data policy
++
++The workflow intentionally does not upload raw market-data SQLite databases, raw OHLCV CSV downloads, or large generated market-data directories. Those remain local or external artefacts under `docs/artifact_retention_policy.md`.
++
++## Local summary rendering
++
++To reproduce the Actions summary locally after generating a results index:
++
++```bash
++python scripts/write_github_step_summary.py \
++  --index results_index.jsonl \
++  --summary-file results_index.md \
++  --dashboard results_dashboard.html \
++  --out ci_step_summary.md
++```
++
++If `--out` is omitted, the script appends to `$GITHUB_STEP_SUMMARY` when that environment variable is present. Outside GitHub Actions, it prints the summary to stdout.
++
++## Partial runs
++
++The workflow builds the available manifests, index, dashboard, and summary even when validation or replication smoke steps fail. The job still fails at the end if either smoke command fails, but the uploaded artefact and job summary should contain the available diagnostics.
+diff --git a/requirements.txt b/requirements.txt
+index 92f49b8..f4a64b0 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1 +1,5 @@
+ ccxt>=4.4
++pandas>=2.2
++PyYAML>=6.0
++scipy>=1.12
++tabulate>=0.9
+diff --git a/scripts/write_github_step_summary.py b/scripts/write_github_step_summary.py
+new file mode 100644
+index 0000000..5a30f85
+--- /dev/null
++++ b/scripts/write_github_step_summary.py
+@@ -0,0 +1,124 @@
++#!/usr/bin/env python3
++"""Write a GitHub Actions job summary from results_index.jsonl."""
++from __future__ import annotations
++
++import argparse
++import json
++import os
++from collections import Counter
++from pathlib import Path
++from typing import Any
++
++
++def read_index(path: Path) -> list[dict[str, Any]]:
++    rows: list[dict[str, Any]] = []
++    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
++        if not line.strip():
++            continue
++        try:
++            row = json.loads(line)
++        except json.JSONDecodeError as exc:
++            rows.append(warning_row(path, f"invalid JSONL line {line_number}: {exc}"))
++            continue
++        rows.append(row if isinstance(row, dict) else warning_row(path, f"line {line_number} is not a JSON object"))
++    return rows
++
++
++def warning_row(path: Path, message: str) -> dict[str, Any]:
++    return {"run_id": path.name, "scenario": "unknown", "status": "warning", "quality_status": "unknown", "warnings": [message], "data": {}, "metrics": {}, "artefacts": {}}
++
++
++def safe(value: Any) -> str:
++    return "" if value is None else str(value).replace("|", "\\|").replace("\n", " ")
++
++
++def get_dict(row: dict[str, Any], key: str) -> dict[str, Any]:
++    value = row.get(key)
++    return value if isinstance(value, dict) else {}
++
++
++def get_list(row: dict[str, Any], key: str) -> list[Any]:
++    value = row.get(key)
++    return value if isinstance(value, list) else []
++
++
++def metric(row: dict[str, Any], *names: str) -> Any:
++    metrics = get_dict(row, "metrics")
++    data = get_dict(row, "data")
++    for name in names:
++        if metrics.get(name) is not None:
++            return metrics[name]
++        if data.get(name) is not None:
++            return data[name]
++    return None
++
++
++def normal_status(value: Any) -> str:
++    status = str(value or "unknown").lower()
++    return status if status in {"pass", "warning", "fail", "unknown"} else "unknown"
++
++
++def symbol_text(row: dict[str, Any]) -> str:
++    total = metric(row, "symbol_count", "asset_count", "symbols_requested")
++    complete = metric(row, "complete_symbols", "symbols_complete")
++    if total is not None and complete is not None:
++        return f"{complete}/{total}"
++    return "" if total is None else str(total)
++
++
++def window_text(row: dict[str, Any]) -> str:
++    data = get_dict(row, "data")
++    start = data.get("start_timestamp") or data.get("start") or data.get("window_start")
++    end = data.get("end_timestamp") or data.get("end") or data.get("window_end")
++    return f"{start or ''} -> {end or ''}" if start or end else ""
++
++
++def artefact_names(row: dict[str, Any]) -> str:
++    return ", ".join(sorted(get_dict(row, "artefacts")))
++
++
++def render_summary(rows: list[dict[str, Any]], *, index_path: str | None = None, summary_file: str | None = None, dashboard: str | None = None) -> str:
++    counts = Counter(normal_status(row.get("status")) for row in rows)
++    lines = ["# Run results summary", "", "## Status counts", "", "| Status | Count |", "| --- | ---: |"]
++    for status in ("pass", "warning", "fail", "unknown"):
++        lines.append(f"| {status} | {counts.get(status, 0)} |")
++    lines.extend(["", "## Runs", "", "| Run ID | Scenario | Status | Quality | Commit | Window | Symbols | Trades | Net PnL | Warnings | Artefacts |", "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |"])
++    for row in rows:
++        warnings = "; ".join(str(item) for item in get_list(row, "warnings"))
++        commit = str(row.get("commit_sha") or "")[:8]
++        lines.append("| {run_id} | {scenario} | {status} | {quality} | {commit} | {window} | {symbols} | {trades} | {pnl} | {warnings} | {artefacts} |".format(run_id=safe(row.get("run_id")), scenario=safe(row.get("scenario")), status=safe(row.get("status")), quality=safe(row.get("quality_status")), commit=safe(commit), window=safe(window_text(row)), symbols=safe(symbol_text(row)), trades=safe(metric(row, "trade_count")), pnl=safe(metric(row, "net_pnl_usd", "total_pnl_usd")), warnings=safe(warnings), artefacts=safe(artefact_names(row))))
++    lines.extend(["", "## Generated artefacts", ""])
++    for path, label in ((index_path, "results_index.jsonl"), (summary_file, "results_index.md"), (dashboard, "results_dashboard.html")):
++        if path:
++            lines.append(f"- [{label}]({path})")
++    if not any((index_path, summary_file, dashboard)):
++        lines.append("- No index or dashboard paths were supplied.")
++    return "\n".join(lines) + "\n"
++
++
++def write_output(markdown: str, out: str | None) -> None:
++    if out:
++        Path(out).write_text(markdown, encoding="utf-8")
++        return
++    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
++    if summary_path:
++        with Path(summary_path).open("a", encoding="utf-8") as handle:
++            handle.write(markdown)
++        return
++    print(markdown, end="")
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--index", required=True, help="results_index.jsonl path")
++    parser.add_argument("--summary-file", default=None, help="optional results_index.md path to link")
++    parser.add_argument("--dashboard", default=None, help="optional results_dashboard.html path to link")
++    parser.add_argument("--out", default=None, help="write summary to this file instead of GITHUB_STEP_SUMMARY/stdout")
++    args = parser.parse_args(argv)
++    markdown = render_summary(read_index(Path(args.index)), index_path=args.index, summary_file=args.summary_file, dashboard=args.dashboard)
++    write_output(markdown, args.out)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/test_write_github_step_summary.py b/tests/test_write_github_step_summary.py
+new file mode 100644
+index 0000000..76bcdab
+--- /dev/null
++++ b/tests/test_write_github_step_summary.py
+@@ -0,0 +1,61 @@
++from __future__ import annotations
++
++import json
++import subprocess
++import sys
++from pathlib import Path
++
++
++def run_summary(tmp_path: Path, rows: list[dict]) -> str:
++    root = Path(__file__).resolve().parents[1]
++    index = tmp_path / "results_index.jsonl"
++    output = tmp_path / "summary.md"
++    index.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
++    subprocess.run([sys.executable, "scripts/write_github_step_summary.py", "--index", str(index), "--summary-file", "results_index.md", "--dashboard", "results_dashboard.html", "--out", str(output)], cwd=root, check=True, capture_output=True, text=True)
++    return output.read_text(encoding="utf-8")
++
++
++def test_summary_includes_status_counts_and_key_metrics(tmp_path: Path) -> None:
++    summary = run_summary(
++        tmp_path,
++        [
++            {"run_id": "validation", "scenario": "static_validation", "status": "warning", "quality_status": "not_run", "commit_sha": "abcdef123456", "warnings": ["unsupported results present: 1"], "artefacts": {"report": "validation/results/validation_report.md"}},
++            {"run_id": "replication", "scenario": "replication", "status": "pass", "quality_status": "pass", "commit_sha": "abcdef123456", "data": {"asset_count": 15}, "metrics": {"trade_count": 4, "net_pnl_usd": 8.25}, "artefacts": {"summary_json": "replication/results/summary.json", "replication_report": "replication/results/replication_report.md"}},
++        ],
++    )
++    assert "# Run results summary" in summary
++    assert "| pass | 1 |" in summary
++    assert "| warning | 1 |" in summary
++    assert "abcdef12" in summary
++    assert "static_validation" in summary
++    assert "replication" in summary
++    assert "15" in summary
++    assert "4" in summary
++    assert "8.25" in summary
++    assert "summary_json" in summary
++    assert "results_dashboard.html" in summary
++
++
++def test_summary_handles_missing_optional_metrics(tmp_path: Path) -> None:
++    summary = run_summary(tmp_path, [{"run_id": "minimal", "scenario": "quality_check", "status": "unknown", "quality_status": "unknown", "warnings": [], "artefacts": {}}])
++    assert "quality_check" in summary
++    assert "| unknown | 1 |" in summary
++    assert "No index or dashboard paths" not in summary
++
++
++def test_summary_escapes_pipes_and_includes_warnings(tmp_path: Path) -> None:
++    summary = run_summary(tmp_path, [{"run_id": "run|one", "scenario": "static_validation", "status": "warning", "quality_status": "not_run", "warnings": ["a|b"], "artefacts": {"report": "validation/results/validation_report.md"}}])
++    assert "run\\|one" in summary
++    assert "a\\|b" in summary
++    assert "report" in summary
++
++
++def test_summary_represents_invalid_jsonl_line_as_warning(tmp_path: Path) -> None:
++    root = Path(__file__).resolve().parents[1]
++    index = tmp_path / "results_index.jsonl"
++    output = tmp_path / "summary.md"
++    index.write_text("{not valid json\n", encoding="utf-8")
++    subprocess.run([sys.executable, "scripts/write_github_step_summary.py", "--index", str(index), "--out", str(output)], cwd=root, check=True, capture_output=True, text=True)
++    summary = output.read_text(encoding="utf-8")
++    assert "invalid JSONL line 1" in summary
++    assert "| warning | 1 |" in summary
