@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add paper-window real-data workflow",
+  "implementation_branch": "ai/issue-62-paper-window-real-data-workflow-v2",
+  "issue_number": 62,
+  "pr_body": "Closes #62\n\n## Summary\n\nAdds a manual-only workflow that runs the closest available public-data reconstruction of the AGENTICAITA paper window.\n\n## Changes\n\n- Adds a `Paper Window Real Data Replication` workflow with manual dispatch inputs.\n- Supports `closest` mode, which attempts Hyperliquid first and falls back to Binance USD-M when Hyperliquid cannot produce complete exportable OHLCV coverage.\n- Runs the real-data replication workflow, quality checks, run manifests, result index, HTML dashboard, GitHub Actions summary, and compact artefact upload.\n- Avoids raw SQLite and per-symbol raw OHLCV CSV uploads by default.\n- Documents the workflow and interpretation limits.\n\n## Validation\n\n- `git apply --check /tmp/issue62v2.diff` in a clean temporary git worktree.\n- Static review of workflow steps against existing scripts.\n- Full live market-data workflow was not run from this patch submission because it is a manual workflow and may take a long time or hit public exchange rate limits.",
+  "pr_title": "Add manual paper-window real-data replication workflow",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue62v2.diff in a clean temporary git worktree.",
+    "Static review of workflow steps against existing scripts.",
+    "Full live market-data workflow not run from this patch submission; it is manual and may take a long time or hit public exchange rate limits."
+  ]
+}
