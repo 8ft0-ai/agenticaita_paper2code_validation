@@ -1,0 +1,20 @@
+{
+  "artifact_kind": "github_release_asset_pointer",
+  "release_tag": "paper-window-real-data-20260406-20260411",
+  "archive": "paper-window-real-data-20260406-20260411.tar.gz",
+  "manifest": "paper-window-real-data-20260406-20260411.manifest.json",
+  "sha256": "<filled-by-promotion-workflow>",
+  "metadata": {
+    "requested_mode": "closest",
+    "chosen_exchange": "<hyperliquid-or-binanceusdm>",
+    "window_start": "2026-04-06T00:00:00Z",
+    "window_end": "2026-04-11T23:59:59Z",
+    "timeframe": "1m",
+    "symbol_limit": "15",
+    "fallback_reason": "<none-or-reason>"
+  },
+  "limitations": [
+    "Public-market comparable reconstruction only.",
+    "Does not recover original order book snapshots, prompts, LLM calls, dry-run logs, or execution assumptions."
+  ]
+}

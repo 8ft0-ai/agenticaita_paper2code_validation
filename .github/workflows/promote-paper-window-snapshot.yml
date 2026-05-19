@@ -1,0 +1,156 @@
+name: Promote Paper Window Snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Workflow run id containing the paper-window Actions artefact
+        required: true
+      source_artifact_name:
+        description: Optional exact Actions artefact name. Leave blank to download all artefacts from the run.
+        required: false
+        default: ""
+      release_tag:
+        description: GitHub Release tag for the retained snapshot
+        required: true
+        default: paper-window-real-data-20260406-20260411
+      archive_base:
+        description: Base filename for release assets
+        required: true
+        default: paper-window-real-data-20260406-20260411
+      include_replication_input:
+        description: Include exported replication_input_ohlcv.csv in the retained archive
+        required: true
+        type: boolean
+        default: true
+      overwrite_release_assets:
+        description: Replace existing assets on an existing release
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download source Actions artefact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p snapshot-source
+          if [ -n "${{ inputs.source_artifact_name }}" ]; then
+            gh run download "${{ inputs.source_run_id }}" --name "${{ inputs.source_artifact_name }}" --dir snapshot-source
+          else
+            gh run download "${{ inputs.source_run_id }}" --dir snapshot-source
+          fi
+          find snapshot-source -maxdepth 5 -type f | sort
+
+      - name: Build retained archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ inputs.archive_base }}"
+          tag="${{ inputs.release_tag }}"
+          mkdir -p release-artifacts "release-stage/${base}"
+
+          copy_if_present() {
+            local src="$1"
+            if [ -f "snapshot-source/${src}" ]; then
+              mkdir -p "release-stage/${base}/$(dirname "${src}")"
+              cp "snapshot-source/${src}" "release-stage/${base}/${src}"
+            fi
+          }
+
+          copy_glob() {
+            local pattern="$1"
+            shopt -s nullglob
+            for file in snapshot-source/${pattern}; do
+              local rel="${file#snapshot-source/}"
+              copy_if_present "${rel}"
+            done
+            shopt -u nullglob
+          }
+
+          copy_if_present run_selection.json
+          copy_if_present real_data_attempts.log
+          copy_if_present results_index.jsonl
+          copy_if_present results_index.md
+          copy_if_present results_dashboard.html
+          copy_glob 'run_*.log'
+          copy_glob 'data/*_ohlcv_paper_window/manifest.json'
+          copy_glob 'data/*_ohlcv_paper_window/coverage_report.json'
+          copy_glob 'data/*_ohlcv_paper_window/coverage_report.md'
+          copy_glob 'data/*_ohlcv_paper_window/complete_symbols_*.txt'
+          copy_glob 'data/*_ohlcv_paper_window/run_manifest.json'
+          copy_glob 'replication/results_real_*_paper_window/run_manifest.json'
+          copy_glob 'replication/results_real_*_paper_window/quality_run_manifest.json'
+          copy_glob 'replication/results_real_*_paper_window/quality_report.json'
+          copy_glob 'replication/results_real_*_paper_window/quality_report.stderr'
+          copy_glob 'replication/results_real_*_paper_window/summary.json'
+          copy_glob 'replication/results_real_*_paper_window/replication_report.md'
+          if [ "${{ inputs.include_replication_input }}" = "true" ]; then
+            copy_if_present replication_input_ohlcv.csv
+          fi
+
+          if ! find "release-stage/${base}" -type f | grep -q .; then
+            echo "No safe files were found in the source artefact."
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          base = "${{ inputs.archive_base }}"
+          tag = "${{ inputs.release_tag }}"
+          root = Path("release-stage") / base
+          files = sorted(str(path.relative_to(root)) for path in root.rglob("*") if path.is_file())
+          selection = json.loads((root / "run_selection.json").read_text()) if (root / "run_selection.json").exists() else {}
+          manifest = {
+              "schema_version": "1",
+              "artifact_kind": "paper_window_real_data_snapshot",
+              "release_tag": tag,
+              "archive_base": base,
+              "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+              "selection": selection,
+              "included_files": files,
+              "excluded_by_policy": [
+                  "raw SQLite databases",
+                  "raw per-symbol OHLCV CSV directories",
+                  "broker patch archives",
+                  "runtime caches and local machine files",
+              ],
+              "limitations": [
+                  "Public-market comparable reconstruction only.",
+                  "Does not recover original order book snapshots, prompts, LLM calls, dry-run logs, or execution assumptions.",
+              ],
+          }
+          (root / "snapshot_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          PY
+
+          tar -czf "release-artifacts/${base}.tar.gz" -C release-stage "${base}"
+          (cd release-artifacts && sha256sum "${base}.tar.gz" > "${base}.tar.gz.sha256")
+          archive_sha="$(cut -d' ' -f1 "release-artifacts/${base}.tar.gz.sha256")"
+          python - <<PY
+          import json
+          from pathlib import Path
+          base = "${{ inputs.archive_base }}"
+          tag = "${{ inputs.release_tag }}"
+          stage_manifest = json.loads((Path("release-stage") / base / "snapshot_manifest.json").read_text())
+          stage_manifest["archive"] = f"{base}.tar.gz"
+          stage_manifest["archive_sha256"] = "${archive_sha}"
+          stage_manifest["archive_bytes"] = Path("release-artifacts", f"{base}.tar.gz").stat().st_size
+          Path("release-artifacts", f"{base}.manifest.json").write_text(json.dumps(stage_manifest, indent=2, sort_keys=True) + "\n")
+          pointer = {
+              "artifact_kind": "github_release_asset_pointer",
+              "release_tag": tag,
+              "archive": f"{base}.tar.gz",
+              "manifest": f"{base}.manifest.json",
+              "sha256": "${archive_sha}",
