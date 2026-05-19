@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Document issue-native label taxonomy",
+  "implementation_branch": "ai/issue-72-issue-label-taxonomy",
+  "issue_number": 72,
+  "pr_body": "Closes #72\n\n## Summary\n\nStarts the issue-native development-management model for the repository by documenting the label taxonomy and adding a repeatable label setup script.\n\n## Changes\n\n- Adds `docs/issue_management.md` defining issue-native planning, label families, `agent-ready`, and assistant selection rules.\n- Adds `scripts/setup_issue_labels.py` to create or update the repository labels with GitHub CLI.\n\n## Validation\n\n- Prepared unified diff against current `main`; broker-side `git apply --check` validates the submitted patch.\n- Documentation/lightweight automation only; runtime market-data and validation CLIs were not run.",
+  "pr_title": "Define issue-native label taxonomy",
+  "schema_version": "2",
+  "validation": [
+    "Prepared unified diff against current main (7284b8b60d746582c1bbc81e0a9259fcf5f6a999); broker-side git apply --check validates the submitted patch.",
+    "Documentation/lightweight automation only; runtime market-data and validation CLIs were not run."
+  ]
+}

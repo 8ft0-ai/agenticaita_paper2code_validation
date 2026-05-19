@@ -1,0 +1,261 @@
+diff --git a/docs/issue_management.md b/docs/issue_management.md
+new file mode 100644
+index 0000000..5a4e8d1
+--- /dev/null
++++ b/docs/issue_management.md
+@@ -0,0 +1,135 @@
++# Issue-Native Development Management
++
++This repository uses GitHub issues as the canonical planning surface for validation, replication, documentation, and workflow work. GitHub Projects may still be useful as a human visual board, but the repository should not depend on Project-board state for agentic development.
++
++The operating rule is:
++
++> Issues are the work items, labels are the workflow fields, milestones are the planning horizons, and repository documentation is the durable roadmap.
++
++## Why this model
++
++The current GitHub connector can reliably inspect repository files, issues, pull requests, labels attached to issues, and Actions logs. It cannot reliably inspect GitHub Projects v2 boards. Keeping planning state in issue metadata makes the work visible to humans, GitHub Actions, and assistant-driven development sessions.
++
++## Label families
++
++Labels use prefixes so they behave like structured fields.
++
++### Area
++
++Use one primary `area:*` label where possible.
++
++| Label | Meaning |
++| --- | --- |
++| `area:validation` | Static and real-data claim validation. |
++| `area:replication` | Functional replication harness and architecture runs. |
++| `area:data` | Market-data download, conversion, coverage, or storage workflows. |
++| `area:docs` | Repository docs, Wiki staging pages, runbooks, and evidence pages. |
++| `area:automation` | Scripts, Actions, broker tooling, issue management, and CI automation. |
++| `area:workflow` | Repository process, patch-submission flow, and operating model changes. |
++| `area:research` | Open research questions or exploratory investigations. |
++
++### Priority
++
++Priority labels are local to this repository.
++
++| Label | Meaning |
++| --- | --- |
++| `priority:P0` | Urgent or blocks the current roadmap. |
++| `priority:P1` | Important and should be done soon. |
++| `priority:P2` | Useful, but can wait. |
++
++### Status
++
++Use one `status:*` label at a time.
++
++| Label | Meaning |
++| --- | --- |
++| `status:backlog` | Captured but not ready for work. |
++| `status:ready` | Clear enough to start. |
++| `status:in-progress` | Someone or an agent is actively working on it. |
++| `status:review` | Implemented and awaiting PR/review/merge. |
++| `status:blocked` | Cannot proceed without a dependency or human action. |
++| `status:done` | Completed and retained for issue-dashboard history if useful. |
++
++### Size
++
++| Label | Meaning |
++| --- | --- |
++| `size:small` | Suitable for one focused patch or PR. |
++| `size:medium` | Manageable, but likely touches multiple files or behaviours. |
++| `size:large` | Should usually be split before an agent starts work. |
++
++### Evidence level
++
++| Label | Meaning |
++| --- | --- |
++| `evidence:static-audit` | Checks reported quantities, logic, or documentation without live reconstruction. |
++| `evidence:functional-replication` | Executes a functional approximation of the paper architecture. |
++| `evidence:empirical-replication` | Uses public market data for comparable empirical reconstruction. |
++
++### Artifact dependency
++
++| Label | Meaning |
++| --- | --- |
++| `artifact:none` | No special external artefacts are required. |
++| `artifact:public-data` | Public data must be fetched or available locally. |
++| `artifact:author-artifacts-required` | The issue depends on unavailable original paper artefacts. |
++
++### Agent workflow
++
++| Label | Meaning |
++| --- | --- |
++| `agent-ready` | Safe for an assistant to pick up without further clarification. |
++| `needs-human` | Requires a human decision or manual action. |
++| `needs-triage` | Missing area, priority, status, or scope metadata. |
++| `needs-acceptance-criteria` | The issue is not specific enough to implement safely. |
++| `blocked:credentials` | Requires a token, secret, account permission, or external credential. |
++| `blocked:external-api` | Blocked by an external API or service behaviour. |
++| `blocked:manual-step` | Requires a manual step outside repository automation. |
++| `blocked:author-artifacts` | Requires original paper artefacts not present in the repository. |
++
++## `agent-ready` definition
++
++Only apply `agent-ready` when all of these are true:
++
++- the goal is clear;
++- the change is scoped to one issue;
++- acceptance criteria are explicit;
++- expected validation is stated;
++- relevant files, directories, or commands are identified;
++- the issue is not blocked by credentials, missing artefacts, or a manual external step;
++- generated artefact and retention constraints are clear;
++- the likely change is `size:small` or a clearly bounded `size:medium`.
++
++Do not combine `agent-ready` with `status:blocked`, `needs-human`, or `needs-acceptance-criteria`.
++
++## Suggested assistant selection rule
++
++When asked to take the next issue, an assistant should prefer:
++
++1. open issues with `agent-ready`;
++2. `priority:P0`, then `priority:P1`, then `priority:P2`;
++3. `size:small` before `size:medium`;
++4. issues that are not blocked and have a clear validation path.
++
++The assistant should work on exactly one issue and submit through the patch-submission broker described in `AGENTS.md`.
++
++## Label setup
++
++Run the label setup script from the repository root:
++
++```bash
++python scripts/setup_issue_labels.py --repo 8ft0-ai/agenticaita_paper2code_validation --dry-run
++python scripts/setup_issue_labels.py --repo 8ft0-ai/agenticaita_paper2code_validation
++```
++
++The script shells out to the GitHub CLI. It is intentionally small and safe to inspect. Use `--dry-run` before applying changes.
++
++## Future extensions
++
++The next issue-management improvements should add:
++
++- issue forms under `.github/ISSUE_TEMPLATE/`;
++- a roadmap document under `docs/roadmap.md`;
++- an issue-dashboard generator that groups open issues by labels, priority, milestone, and blocked state;
++- a report-only issue hygiene workflow that detects contradictory or missing metadata.
+diff --git a/scripts/setup_issue_labels.py b/scripts/setup_issue_labels.py
+new file mode 100755
+index 0000000..2245b21
+--- /dev/null
++++ b/scripts/setup_issue_labels.py
+@@ -0,0 +1,114 @@
++#!/usr/bin/env python3
++"""Create or update the repository issue-label taxonomy."""
++from __future__ import annotations
++
++import argparse
++import subprocess
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class LabelSpec:
++    name: str
++    color: str
++    description: str
++
++
++LABELS: tuple[LabelSpec, ...] = (
++    LabelSpec("area:validation", "1f77b4", "Static and real-data claim validation."),
++    LabelSpec("area:replication", "5319e7", "Functional replication harness and architecture runs."),
++    LabelSpec("area:data", "0e8a16", "Market-data download, conversion, coverage, or storage workflows."),
++    LabelSpec("area:docs", "0075ca", "Repository docs, Wiki staging pages, runbooks, and evidence pages."),
++    LabelSpec("area:automation", "c5def5", "Scripts, Actions, broker tooling, issue management, and CI automation."),
++    LabelSpec("area:workflow", "bfdadc", "Repository process, patch-submission flow, and operating model changes."),
++    LabelSpec("area:research", "d4c5f9", "Open research questions or exploratory investigations."),
++    LabelSpec("priority:P0", "b60205", "Urgent or blocks the current roadmap."),
++    LabelSpec("priority:P1", "d93f0b", "Important and should be done soon."),
++    LabelSpec("priority:P2", "fbca04", "Useful, but can wait."),
++    LabelSpec("status:backlog", "ededed", "Captured but not ready for work."),
++    LabelSpec("status:ready", "0e8a16", "Clear enough to start."),
++    LabelSpec("status:in-progress", "fbca04", "Someone or an agent is actively working on it."),
++    LabelSpec("status:review", "5319e7", "Implemented and awaiting PR, review, or merge."),
++    LabelSpec("status:blocked", "b60205", "Cannot proceed without a dependency or human action."),
++    LabelSpec("status:done", "c2e0c6", "Completed and retained for dashboard history if useful."),
++    LabelSpec("size:small", "c2e0c6", "Suitable for one focused patch or PR."),
++    LabelSpec("size:medium", "fbca04", "Manageable, but likely touches multiple files or behaviours."),
++    LabelSpec("size:large", "d93f0b", "Should usually be split before an agent starts work."),
++    LabelSpec("evidence:static-audit", "c5def5", "Checks reported quantities, logic, or documentation without live reconstruction."),
++    LabelSpec("evidence:functional-replication", "d4c5f9", "Executes a functional approximation of the paper architecture."),
++    LabelSpec("evidence:empirical-replication", "5319e7", "Uses public market data for comparable empirical reconstruction."),
++    LabelSpec("artifact:none", "c2e0c6", "No special external artefacts are required."),
++    LabelSpec("artifact:public-data", "0e8a16", "Public data must be fetched or available locally."),
++    LabelSpec("artifact:author-artifacts-required", "b60205", "Depends on unavailable original paper artefacts."),
++    LabelSpec("agent-ready", "0e8a16", "Safe for an assistant to pick up without further clarification."),
++    LabelSpec("needs-human", "d93f0b", "Requires a human decision or manual action."),
++    LabelSpec("needs-triage", "fbca04", "Missing area, priority, status, or scope metadata."),
++    LabelSpec("needs-acceptance-criteria", "d93f0b", "The issue is not specific enough to implement safely."),
++    LabelSpec("blocked:credentials", "b60205", "Requires a token, secret, account permission, or external credential."),
++    LabelSpec("blocked:external-api", "b60205", "Blocked by an external API or service behaviour."),
++    LabelSpec("blocked:manual-step", "b60205", "Requires a manual step outside repository automation."),
++    LabelSpec("blocked:author-artifacts", "b60205", "Requires original paper artefacts not present in the repository."),
++)
++
++
++def run(command: list[str], *, dry_run: bool) -> None:
++    print("+ " + " ".join(command))
++    if not dry_run:
++        subprocess.run(command, check=True)
++
++
++def label_exists(repo: str, name: str) -> bool:
++    result = subprocess.run(
++        ["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--jq", ".[ ].name"],
++        check=True,
++        capture_output=True,
++        text=True,
++    )
++    return name in {line.strip() for line in result.stdout.splitlines()}
++
++
++def apply_label(repo: str, label: LabelSpec, *, dry_run: bool) -> None:
++    base = ["gh", "label"]
++    if label_exists(repo, label.name):
++        command = [
++            *base,
++            "edit",
++            label.name,
++            "--repo",
++            repo,
++            "--color",
++            label.color,
++            "--description",
++            label.description,
++        ]
++    else:
++        command = [
++            *base,
++            "create",
++            label.name,
++            "--repo",
++            repo,
++            "--color",
++            label.color,
++            "--description",
++            label.description,
++        ]
++    run(command, dry_run=dry_run)
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--repo", required=True, help="Repository in owner/name form.")
++    parser.add_argument("--dry-run", action="store_true", help="Print gh commands without applying label changes.")
++    return parser
++
++
++def main() -> int:
++    args = build_parser().parse_args()
++    for label in LABELS:
++        apply_label(args.repo, label, dry_run=args.dry_run)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
