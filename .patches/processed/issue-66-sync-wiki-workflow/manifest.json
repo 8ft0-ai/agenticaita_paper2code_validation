@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add Wiki sync workflow",
+  "implementation_branch": "ai/issue-66-sync-wiki-workflow",
+  "issue_number": 66,
+  "pr_body": "Closes #66\n\n## Summary\n\nAdds a GitHub Actions workflow that publishes reviewed `docs/wiki/*.md` pages to the repository Wiki.\n\n## Changes\n\n- Adds `.github/workflows/sync-wiki.yml` with `workflow_dispatch` and `main`/`docs/wiki/**` triggers.\n- Publishes staged Wiki Markdown pages to the `.wiki.git` remote using `WIKI_PUSH_TOKEN`.\n- Supports first-run Wiki initialisation by creating a local Wiki repository when clone fails, then pushing to the Wiki remote.\n- Documents token requirements, trigger behaviour, publication behaviour, and failure modes in `docs/wiki_sync_workflow.md`.\n\n## Validation\n\n- `git apply --check /tmp/issue66.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow syntax reviewed for GitHub Actions YAML structure and shell failure paths.\n- The workflow itself was not run because it requires a configured `WIKI_PUSH_TOKEN` secret and live Wiki remote access.",
+  "pr_title": "Add GitHub Actions workflow to sync Wiki pages",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue66.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow syntax reviewed for GitHub Actions YAML structure and shell failure paths.",
+    "Workflow execution skipped because it requires a configured WIKI_PUSH_TOKEN secret and live Wiki remote access."
+  ]
+}
