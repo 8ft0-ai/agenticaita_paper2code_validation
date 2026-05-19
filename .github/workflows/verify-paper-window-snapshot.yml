@@ -1,0 +1,56 @@
+name: Verify Paper Window Snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub Release tag containing the retained snapshot
+        required: true
+        default: paper-window-real-data-20260406-20260411
+      archive_base:
+        description: Base filename for release assets
+        required: true
+        default: paper-window-real-data-20260406-20260411
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.release_tag }}" \
+            --pattern "${{ inputs.archive_base }}.tar.gz" \
+            --pattern "${{ inputs.archive_base }}.tar.gz.sha256" \
+            --pattern "${{ inputs.archive_base }}.manifest.json"
+
+      - name: Verify checksum and extract
+        run: |
+          sha256sum -c "${{ inputs.archive_base }}.tar.gz.sha256"
+          mkdir -p retained-snapshot
+          tar -xzf "${{ inputs.archive_base }}.tar.gz" -C retained-snapshot
+          find retained-snapshot -maxdepth 5 -type f | sort
+
+      - name: Validate required snapshot files
+        run: |
+          test -f retained-snapshot/${{ inputs.archive_base }}/snapshot_manifest.json
+          test -f retained-snapshot/${{ inputs.archive_base }}/results_index.jsonl
+          test -f retained-snapshot/${{ inputs.archive_base }}/results_dashboard.html
+          test -f "${{ inputs.archive_base }}.manifest.json"
+
+      - name: Write summary
+        run: |
+          {
+            echo "# Paper-window snapshot verification"
+            echo
+            echo "Release tag: \`${{ inputs.release_tag }}\`"
+            echo "Archive: \`${{ inputs.archive_base }}.tar.gz\`"
+            echo "Checksum verification: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
