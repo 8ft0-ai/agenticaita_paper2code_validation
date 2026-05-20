@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Document issue dashboard runbook",
+  "implementation_branch": "ai/issue-80-dashboard-runbook",
+  "issue_number": 80,
+  "pr_body": "Closes #80\n\n## Summary\n\nDocuments how to run and interpret the generated issue dashboard alongside the curated roadmap.\n\n## Changes\n\n- Adds `docs/issue_dashboard_runbook.md` with GitHub CLI prerequisites, generator commands, state filters, output policy, and interpretation notes.\n- Links the dashboard runbook from `docs/issue_management.md`.\n- Updates `docs/roadmap.md` to reflect the merged dashboard design and generator work and to distinguish curated roadmap content from generated snapshots.\n\n## Validation\n\n- `git apply --check /mnt/data/issue80.diff` on the exact unified diff in a clean temporary git worktree.\n- Documentation-only review of links, commands, and repository paths.",
+  "pr_title": "Add issue dashboard runbook and roadmap links",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /mnt/data/issue80.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation-only review of links, commands, and repository paths."
+  ]
+}
