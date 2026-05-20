@@ -1,0 +1,17 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Automate issue label setup",
+  "implementation_branch": "ai/issue-84-automate-label-setup",
+  "issue_number": 84,
+  "pr_body": "Closes #84\n\n## Summary\n\nAdds a manual GitHub Actions workflow for creating or updating the issue-native label taxonomy from the existing label setup script.\n\n## Changes\n\n- Adds `.github/workflows/setup-issue-labels.yml` with a `workflow_dispatch` dry-run input.\n- Grants the workflow `issues: write` and `contents: read` permissions.\n- Runs `scripts/setup_issue_labels.py` against the current repository using GitHub Actions authentication.\n- Fixes the label-list jq expression in `scripts/setup_issue_labels.py`.\n\n## Validation\n\n- `git apply --check /tmp/issue84.patch` on the exact unified diff in a clean temporary git worktree.\n- `python -m py_compile scripts/setup_issue_labels.py` after applying the script change.\n- Workflow YAML and command path reviewed.\n- Runtime workflow execution skipped until after merge because the non-dry-run mode mutates repository labels.",
+  "pr_title": "Automate issue label setup",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue84.patch on the exact unified diff in a clean temporary git worktree.",
+    "python -m py_compile scripts/setup_issue_labels.py after applying the script change.",
+    "Workflow YAML and command path reviewed.",
+    "Runtime workflow execution skipped until after merge because non-dry-run mode mutates repository labels."
+  ]
+}
