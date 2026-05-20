@@ -1,0 +1,17 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add issue dashboard generator",
+  "implementation_branch": "ai/issue-79-issue-dashboard-generator",
+  "issue_number": 79,
+  "pr_body": "Closes #79\n\n## Summary\n\nAdds a manually runnable issue-dashboard generator that reads GitHub issue metadata through the GitHub CLI and emits deterministic Markdown and JSON snapshots.\n\n## Changes\n\n- Adds `scripts/generate_issue_dashboard.py`.\n- Groups issues by `agent-ready`, blocked labels, `status:*`, `priority:*`, `area:*`, and milestone.\n- Supports repository, issue state, limit, Markdown output, JSON output, stdout, and deterministic timestamp arguments.\n- Does not mutate issues, labels, milestones, comments, or `docs/roadmap.md`.\n\n## Validation\n\n- `python -m py_compile /mnt/data/generate_issue_dashboard_compact.py` on the submitted script content.\n- `python /mnt/data/generate_issue_dashboard_compact.py --help` returned exit code 0.\n- Smoke-tested snapshot rendering with synthetic issue metadata.\n- Live GitHub CLI run was skipped because `gh` is not installed/authenticated in the execution environment.",
+  "pr_title": "Implement issue dashboard generator CLI",
+  "schema_version": "2",
+  "validation": [
+    "python -m py_compile /mnt/data/generate_issue_dashboard_compact.py on the submitted script content.",
+    "python /mnt/data/generate_issue_dashboard_compact.py --help returned exit code 0.",
+    "Smoke-tested snapshot rendering with synthetic issue metadata.",
+    "Live GitHub CLI run skipped because gh is not installed/authenticated in the execution environment."
+  ]
+}
