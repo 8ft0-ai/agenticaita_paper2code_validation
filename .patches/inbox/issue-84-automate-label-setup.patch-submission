@@ -1,0 +1,100 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 84,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-84-automate-label-setup",
+  "commit_message": "Automate issue label setup",
+  "pr_title": "Automate issue label setup",
+  "pr_body": "Closes #84\n\n## Summary\n\nAdds a manual GitHub Actions workflow for creating or updating the issue-native label taxonomy from the existing label setup script.\n\n## Changes\n\n- Adds `.github/workflows/setup-issue-labels.yml` with a `workflow_dispatch` dry-run input.\n- Grants the workflow `issues: write` and `contents: read` permissions.\n- Runs `scripts/setup_issue_labels.py` against the current repository using GitHub Actions authentication.\n- Fixes the label-list jq expression in `scripts/setup_issue_labels.py`.\n\n## Validation\n\n- `git apply --check /tmp/issue84.patch` on the exact unified diff in a clean temporary git worktree.\n- `python -m py_compile scripts/setup_issue_labels.py` after applying the script change.\n- Workflow YAML and command path reviewed.\n- Runtime workflow execution skipped until after merge because the non-dry-run mode mutates repository labels.",
+  "validation": [
+    "git apply --check /tmp/issue84.patch on the exact unified diff in a clean temporary git worktree.",
+    "python -m py_compile scripts/setup_issue_labels.py after applying the script change.",
+    "Workflow YAML and command path reviewed.",
+    "Runtime workflow execution skipped until after merge because non-dry-run mode mutates repository labels."
+  ],
+  "allow_workflow_changes": true
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/.github/workflows/setup-issue-labels.yml b/.github/workflows/setup-issue-labels.yml
+new file mode 100644
+index 0000000..5a6fb9f
+--- /dev/null
++++ b/.github/workflows/setup-issue-labels.yml
+@@ -0,0 +1,61 @@
++name: Set up issue labels
++
++on:
++  workflow_dispatch:
++    inputs:
++      dry_run:
++        description: Print planned label create/update commands without mutating labels.
++        required: true
++        default: true
++        type: boolean
++
++permissions:
++  contents: read
++  issues: write
++
++jobs:
++  setup-labels:
++    name: Set up issue label taxonomy
++    runs-on: ubuntu-latest
++    env:
++      GH_TOKEN: ${{ secrets.PATCH_BOT_TOKEN || github.token }}
++      DRY_RUN: ${{ inputs.dry_run }}
++      TARGET_REPO: ${{ github.repository }}
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: "3.x"
++
++      - name: Run label setup
++        shell: bash
++        run: |
++          set -euo pipefail
++
++          args=(--repo "$TARGET_REPO")
++          if [ "$DRY_RUN" = "true" ]; then
++            args+=(--dry-run)
++          fi
++
++          python scripts/setup_issue_labels.py "${args[@]}"
++
++      - name: Write job summary
++        if: always()
++        shell: bash
++        run: |
++          {
++            echo "## Issue label setup"
++            echo
++            echo "- Repository: \`$TARGET_REPO\`"
++            echo "- Dry run: \`$DRY_RUN\`"
++            echo "- Script: \`scripts/setup_issue_labels.py\`"
++            echo
++            if [ "$DRY_RUN" = "true" ]; then
++              echo "This was a dry run. Re-run the workflow with \`dry_run=false\` to create or update labels."
++            else
++              echo "The workflow attempted to create or update the issue-native label taxonomy."
++            fi
++          } >> "$GITHUB_STEP_SUMMARY"
+diff --git a/scripts/setup_issue_labels.py b/scripts/setup_issue_labels.py
+index d9f004e..f807d27 100644
+--- a/scripts/setup_issue_labels.py
++++ b/scripts/setup_issue_labels.py
+@@ -59,7 +59,7 @@ def run(command: list[str], *, dry_run: bool) -> None:
+ 
+ def label_exists(repo: str, name: str) -> bool:
+     result = subprocess.run(
+-        ["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--jq", ".[ ].name"],
++        ["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--jq", ".[].name"],
+         check=True,
+         capture_output=True,
+         text=True,
