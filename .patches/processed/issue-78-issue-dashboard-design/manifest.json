@@ -1,0 +1,15 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Design issue dashboard schema",
+  "implementation_branch": "ai/issue-78-issue-dashboard-design",
+  "issue_number": 78,
+  "pr_body": "Closes #78\n\n## Summary\n\nAdds a design note for the first issue-dashboard generator contract before implementation.\n\n## Changes\n\n- Adds `docs/issue_dashboard_design.md` describing source fields, Markdown sections, JSON schema, grouping rules, sorting rules, and first-implementation boundaries.\n- Clarifies that `docs/roadmap.md` is curated while issue-dashboard output is generated.\n- Defines metadata warnings for missing or contradictory issue labels.\n\n## Validation\n\n- `git apply --check patch.diff` on the exact unified diff in a clean temporary git worktree.\n- Documentation-only review of the proposed schema and grouping rules.",
+  "pr_title": "Design issue dashboard schema and grouping rules",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check patch.diff on the exact unified diff in a clean temporary git worktree.",
+    "Documentation-only review of the proposed schema and grouping rules."
+  ]
+}

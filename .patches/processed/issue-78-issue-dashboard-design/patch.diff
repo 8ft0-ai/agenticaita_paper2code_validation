@@ -1,0 +1,195 @@
+diff --git a/docs/issue_dashboard_design.md b/docs/issue_dashboard_design.md
+new file mode 100644
+index 0000000..1a4ae4d
+--- /dev/null
++++ b/docs/issue_dashboard_design.md
+@@ -0,0 +1,189 @@
++# Issue Dashboard Design
++
++This document defines the first issue-dashboard generator contract. The generated dashboard is a factual view of GitHub issue metadata; it does not replace `docs/roadmap.md`, issue labels, milestones, or issue comments.
++
++The first implementation should be manually runnable and deterministic. Scheduled automation, label mutation, and issue hygiene comments are intentionally out of scope for this design.
++
++## Source of truth
++
++The dashboard reads GitHub issues and pull-request issue records from the repository API or GitHub CLI. It should not read GitHub Projects data.
++
++Required issue fields:
++
++| Field | Required use |
++| --- | --- |
++| `number` | Stable issue identifier and sort key. |
++| `title` | Human-readable row label. |
++| `state` | Open, closed, or all-state filtering. |
++| `labels[].name` | Grouping by status, priority, area, blocked state, artefact dependency, evidence level, and `agent-ready`. |
++| `html_url` or `url` | Links in Markdown and JSON. |
++| `milestone.title` | Grouping by planning horizon when present. |
++| `created_at` | Tie-breaker and audit context. |
++| `updated_at` | Dashboard recency context. |
++| `closed_at` | Recently closed section when closed issues are included. |
++| `assignees[].login` | Optional ownership display. |
++| `pull_request` | Exclude or mark PR issue records when an issues-only view is requested. |
++
++Optional fields may be present in JSON output when available, but the generator should not fail if optional ownership or milestone fields are absent.
++
++## Markdown dashboard sections
++
++The first Markdown dashboard should use these sections in order:
++
++1. **Header and generation metadata**: repository, generation time in UTC, issue state filter, and generator command if available.
++2. **Summary counts**: total issues included, open issues, closed issues, `agent-ready`, blocked, untriaged, and metadata-incomplete.
++3. **Agent-ready issues**: issues with `agent-ready` and without blocking labels.
++4. **Blocked issues**: issues with `status:blocked` or any `blocked:*` label.
++5. **Issues by status**: grouped by `status:*`, with `No status` as an explicit bucket.
++6. **Issues by priority**: grouped by `priority:P0`, `priority:P1`, `priority:P2`, then `No priority`.
++7. **Issues by area**: grouped by `area:*`, then `No area`.
++8. **Issues by milestone**: grouped by milestone title, then `No milestone`.
++9. **Metadata-incomplete issues**: issues missing required planning metadata or containing contradictory labels.
++10. **Recently closed issues**: optional for the first implementation; include only when closed issues are fetched.
++
++Each issue row should include the issue number, title, key labels, milestone, and assignees where available.
++
++## JSON snapshot schema
++
++The JSON snapshot should be stable and suitable for future automation.
++
++Top-level shape:
++
++```json
++{
++  "schema_version": "1",
++  "repository": "owner/name",
++  "generated_at_utc": "YYYY-MM-DDTHH:MM:SSZ",
++  "source": {
++    "tool": "gh",
++    "state_filter": "open",
++    "include_pull_requests": false
++  },
++  "summary": {
++    "total": 0,
++    "open": 0,
++    "closed": 0,
++    "agent_ready": 0,
++    "blocked": 0,
++    "untriaged": 0,
++    "metadata_incomplete": 0
++  },
++  "groups": {
++    "agent_ready": [],
++    "blocked": [],
++    "by_status": {},
++    "by_priority": {},
++    "by_area": {},
++    "by_milestone": {},
++    "metadata_incomplete": [],
++    "recently_closed": []
++  },
++  "issues": []
++}
++```
++
++Each issue entry should use this shape:
++
++```json
++{
++  "number": 78,
++  "title": "Design issue dashboard schema and grouping rules",
++  "state": "open",
++  "url": "https://github.com/owner/repo/issues/78",
++  "labels": ["area:docs", "priority:P1"],
++  "status": ["status:ready"],
++  "priority": ["priority:P1"],
++  "area": ["area:docs"],
++  "blocked": [],
++  "agent_ready": false,
++  "milestone": null,
++  "assignees": [],
++  "created_at": "YYYY-MM-DDTHH:MM:SSZ",
++  "updated_at": "YYYY-MM-DDTHH:MM:SSZ",
++  "closed_at": null,
++  "metadata_warnings": []
++}
++```
++
++Use arrays for label families even when a family should normally have only one value. That makes ambiguous metadata explicit rather than hiding it.
++
++## Grouping rules
++
++Label families are detected by prefix:
++
++| Family | Prefix or exact label |
++| --- | --- |
++| Status | `status:` |
++| Priority | `priority:` |
++| Area | `area:` |
++| Size | `size:` |
++| Evidence level | `evidence:` |
++| Artefact dependency | `artifact:` |
++| Blocked reason | `blocked:` |
++| Agent-ready | exact `agent-ready` |
++| Human/triage flags | `needs-human`, `needs-triage`, `needs-acceptance-criteria` |
++
++Blocked issues are those with `status:blocked` or at least one `blocked:*` label.
++
++Untriaged issues are those with `needs-triage`, no `area:*`, no `priority:*`, or no `status:*`.
++
++Metadata-incomplete issues are those with at least one metadata warning. Warnings should be non-fatal and should include:
++
++- missing `area:*`;
++- missing `priority:*`;
++- missing `status:*`;
++- multiple `status:*` labels;
++- multiple `priority:*` labels;
++- `agent-ready` combined with `status:blocked`;
++- `agent-ready` combined with any `blocked:*` label;
++- `agent-ready` combined with `needs-human`;
++- `agent-ready` combined with `needs-acceptance-criteria`.
++
++## Sorting rules
++
++Output must be deterministic for the same issue metadata.
++
++Use this issue ordering everywhere unless a section documents otherwise:
++
++1. open issues before closed issues;
++2. priority order `priority:P0`, `priority:P1`, `priority:P2`, then no priority, then other priority labels alphabetically;
++3. `agent-ready` before not-ready within the same priority group;
++4. lower issue number first.
++
++Group ordering:
++
++- status: `status:ready`, `status:in-progress`, `status:review`, `status:blocked`, `status:backlog`, `status:done`, `No status`, then any unknown statuses alphabetically;
++- priority: `priority:P0`, `priority:P1`, `priority:P2`, `No priority`, then unknown priorities alphabetically;
++- area: alphabetical by label, with `No area` last;
++- milestone: alphabetical by milestone title, with `No milestone` last;
++- blocked reason: alphabetical by `blocked:*` label.
++
++Recently closed issues, when present, should sort by `closed_at` descending, then issue number descending.
++
++## Roadmap versus dashboard
++
++`docs/roadmap.md` is curated. It explains sequencing, intent, and why a task belongs in Now, Next, Later, Blocked, or Done.
++
++The issue dashboard is generated. It reports what GitHub issue metadata says at generation time.
++
++Do not overwrite the roadmap with generated output. If generated Markdown is committed later, use a separate path such as `docs/issue_dashboard.md`. If JSON is committed later, use a separate path such as `docs/issue_dashboard.json`.
++
++## First implementation boundaries
++
++The first implementation should:
++
++- read issue data;
++- normalise label families;
++- produce Markdown and JSON;
++- support stdout or temporary-output use;
++- fail clearly when GitHub CLI authentication or API access is unavailable;
++- avoid mutating issues, labels, milestones, or comments.
++
++The first implementation should not:
++
++- create labels;
++- assign milestones;
++- comment on issues;
++- close issues;
++- rewrite `docs/roadmap.md`;
++- depend on GitHub Projects.
