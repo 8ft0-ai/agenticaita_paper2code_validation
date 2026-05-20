@@ -1,0 +1,61 @@
+name: Set up issue labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print planned label create/update commands without mutating labels.
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  setup-labels:
+    name: Set up issue label taxonomy
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PATCH_BOT_TOKEN || github.token }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      TARGET_REPO: ${{ github.repository }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run label setup
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          args=(--repo "$TARGET_REPO")
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+
+          python scripts/setup_issue_labels.py "${args[@]}"
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Issue label setup"
+            echo
+            echo "- Repository: \`$TARGET_REPO\`"
+            echo "- Dry run: \`$DRY_RUN\`"
+            echo "- Script: \`scripts/setup_issue_labels.py\`"
+            echo
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "This was a dry run. Re-run the workflow with \`dry_run=false\` to create or update labels."
+            else
+              echo "The workflow attempted to create or update the issue-native label taxonomy."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

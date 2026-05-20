@@ -59,7 +59,7 @@ def run(command: list[str], *, dry_run: bool) -> None:
 
 def label_exists(repo: str, name: str) -> bool:
     result = subprocess.run(
-        ["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--jq", ".[ ].name"],
+        ["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--jq", ".[].name"],
         check=True,
         capture_output=True,
         text=True,
