@@ -1,0 +1,182 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 80,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-80-dashboard-runbook-v2",
+  "commit_message": "Document issue dashboard runbook",
+  "pr_title": "Add issue dashboard runbook and roadmap links",
+  "pr_body": "Closes #80\n\n## Summary\n\nDocuments how to run and interpret the generated issue dashboard alongside the curated roadmap.\n\n## Changes\n\n- Adds `docs/issue_dashboard_runbook.md` with GitHub CLI prerequisites, generator commands, state filters, output policy, and interpretation notes.\n- Links the dashboard runbook from `docs/roadmap.md`.\n- Updates `docs/roadmap.md` to reflect the merged dashboard design and generator work and to distinguish curated roadmap content from generated snapshots.\n\n## Validation\n\n- `git apply --check /mnt/data/issue80v2.diff` on the exact v2 unified diff in a clean temporary git worktree.\n- Documentation-only review of links, commands, and repository paths.\n\n## Note\n\nThe first submission failed at broker `git apply --check`; v2 removes the problematic no-newline patch markers and narrows the scope to the new runbook plus roadmap links.",
+  "validation": [
+    "git apply --check /mnt/data/issue80v2.diff on the exact v2 unified diff in a clean temporary git worktree.",
+    "Documentation-only review of links, commands, and repository paths."
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/issue_dashboard_runbook.md b/docs/issue_dashboard_runbook.md
+new file mode 100644
+index 0000000..dc53f66
+--- /dev/null
++++ b/docs/issue_dashboard_runbook.md
+@@ -0,0 +1,106 @@
++# Issue Dashboard Runbook
++
++The issue dashboard is a generated, factual snapshot of GitHub issue metadata. It complements the curated roadmap in `docs/roadmap.md`; it does not replace the roadmap, labels, milestones, or issue comments.
++
++Use the dashboard when you need a board-like view that is visible to humans, GitHub Actions, and assistant-driven development sessions without relying on GitHub Projects.
++
++## Source of truth
++
++The source of truth remains:
++
++- GitHub issues;
++- issue labels;
++- milestones;
++- issue comments;
++- pull requests;
++- checked-in roadmap and design documentation.
++
++The dashboard reports what that metadata says at generation time. Update issue metadata first, then regenerate the dashboard.
++
++## Prerequisites
++
++Install and authenticate the GitHub CLI:
++
++```bash
++gh auth login
++gh auth status
++```
++
++The authenticated account or token must be able to read issues in this repository.
++
++## Generate a Markdown dashboard
++
++Print the Markdown dashboard to stdout:
++
++```bash
++python scripts/generate_issue_dashboard.py \
++  --repo 8ft0-ai/agenticaita_paper2code_validation
++```
++
++Write the Markdown dashboard to a local file:
++
++```bash
++python scripts/generate_issue_dashboard.py \
++  --repo 8ft0-ai/agenticaita_paper2code_validation \
++  --markdown-output docs/issue_dashboard.md
++```
++
++## Generate Markdown and JSON snapshots
++
++```bash
++python scripts/generate_issue_dashboard.py \
++  --repo 8ft0-ai/agenticaita_paper2code_validation \
++  --markdown-output docs/issue_dashboard.md \
++  --json-output docs/issue_dashboard.json
++```
++
++Use a deterministic timestamp for tests or comparisons:
++
++```bash
++python scripts/generate_issue_dashboard.py \
++  --repo 8ft0-ai/agenticaita_paper2code_validation \
++  --generated-at-utc 2026-01-01T00:00:00Z \
++  --markdown-output /tmp/issue_dashboard.md \
++  --json-output /tmp/issue_dashboard.json
++```
++
++## State filters
++
++The default state filter is `open`.
++
++```bash
++python scripts/generate_issue_dashboard.py --repo 8ft0-ai/agenticaita_paper2code_validation --state open
++python scripts/generate_issue_dashboard.py --repo 8ft0-ai/agenticaita_paper2code_validation --state closed
++python scripts/generate_issue_dashboard.py --repo 8ft0-ai/agenticaita_paper2code_validation --state all
++```
++
++Use `--limit` to control how many issues are fetched from GitHub.
++
++## Output policy
++
++Generated dashboard files are operational snapshots. They may be useful locally or in Actions artefacts.
++
++Do not commit generated dashboard output by default. Commit `docs/issue_dashboard.md` or `docs/issue_dashboard.json` only when a future issue explicitly asks for a reviewed snapshot or a deterministic fixture.
++
++Never overwrite `docs/roadmap.md` with generated dashboard content. The roadmap is curated and explains sequencing; the dashboard is generated and reports current metadata.
++
++## Interpretation
++
++The dashboard groups issues by:
++
++- `agent-ready`;
++- blocked state;
++- `status:*`;
++- `priority:*`;
++- `area:*`;
++- milestone;
++- metadata completeness.
++
++Metadata warnings are advisory. They indicate that an issue may be missing labels or may have contradictory labels, such as `agent-ready` combined with `status:blocked`.
++
++## Relationship to other docs
++
++- `docs/issue_management.md` defines the issue-native operating model and label taxonomy.
++- `docs/issue_dashboard_design.md` defines the dashboard schema and grouping rules.
++- `docs/roadmap.md` remains the curated planning index.
++
+diff --git a/docs/roadmap.md b/docs/roadmap.md
+index 25098fd..f607ca7 100644
+--- a/docs/roadmap.md
++++ b/docs/roadmap.md
+@@ -12,7 +12,7 @@ The source of truth remains GitHub issues and labels. This document is a curated
+ - `agent-ready` marks work that an assistant can safely pick up without further clarification.
+ - Pull requests and patch-submission broker archives provide the implementation audit trail.
+ 
+-See `docs/issue_management.md` for the label taxonomy and readiness rules.
++See `docs/issue_management.md` for the label taxonomy and readiness rules. See `docs/issue_dashboard_runbook.md` for the generated dashboard workflow.
+ 
+ ## Now
+ 
+@@ -20,7 +20,7 @@ Current focus: make issue-native development management practical enough to repl
+ 
+ | Issue | Status | Notes |
+ | --- | --- | --- |
+-| #76 Add issue-native roadmap document | In progress | Creates this curated roadmap as the planning index. |
++| #80 Add issue dashboard runbook and roadmap links | In progress | Documents how to run and interpret the generated dashboard alongside this curated roadmap. |
+ 
+ ## Next
+ 
+@@ -28,8 +28,8 @@ These are the next high-value implementation steps after the roadmap is merged.
+ 
+ | Candidate issue | Area | Why it matters |
+ | --- | --- | --- |
+-| Create an issue-dashboard generator | automation | Produces a machine-readable and Markdown snapshot of open issues grouped by status, priority, blocked state, milestone, and `agent-ready`. |
+-| Add report-only issue hygiene checks | automation | Detects missing labels, conflicting status labels, blocked-but-agent-ready issues, and missing acceptance criteria without mutating issues initially. |
++| Add report-only issue hygiene checks | automation | Uses dashboard metadata warnings to detect missing labels, conflicting status labels, blocked-but-agent-ready issues, and missing acceptance criteria without mutating issues initially. |
++| Decide dashboard publication policy | workflow | Determines whether generated `docs/issue_dashboard.md` and `docs/issue_dashboard.json` should remain local, be stored as Actions artefacts, or be committed by explicit snapshot issues. |
+ | Add roadmap-to-Wiki staging page | docs | Mirrors the curated roadmap into `docs/wiki/` so the GitHub Wiki can show the planning index. |
+ | Run or automate label setup | workflow | Ensures all labels referenced by issue forms and `docs/issue_management.md` exist in the repository. |
+ 
+@@ -60,6 +60,9 @@ Completed work that established the current issue-native workflow.
+ | --- | --- |
+ | #72 Define issue-native label taxonomy and setup script | Added `docs/issue_management.md` and `scripts/setup_issue_labels.py`. |
+ | #74 Add structured issue forms for issue-native workflow | Added structured issue forms for bugs, validation, replication, docs, automation, and research. |
++| #76 Add issue-native roadmap document | Added this curated planning index as a Project-board replacement. |
++| #78 Design issue dashboard schema and grouping rules | Added `docs/issue_dashboard_design.md`. |
++| #79 Implement issue dashboard generator CLI | Added `scripts/generate_issue_dashboard.py`. |
+ | #66 Add GitHub Actions workflow to sync docs/wiki to repository Wiki | Added Wiki publication from reviewed `docs/wiki/` pages. |
+ | #70 Clarify Wiki sync first-run seeding requirement | Documented the one-time Wiki UI seed step. |
+ 
+@@ -70,7 +73,7 @@ Completed work that established the current issue-native workflow.
+ - Use this page to explain sequencing, not to replace labels or milestones.
+ - Move active work from `Next` to `Now` only when it is ready to be implemented.
+ - Mark blocked work in issues first, then summarise the blocker here.
+-- Do not commit generated dashboards into this document by hand; use a separate dashboard file if generated reporting is added.
++- Do not commit generated dashboards into this document by hand; use `docs/issue_dashboard.md`, `docs/issue_dashboard.json`, or Actions artefacts only when a future issue explicitly asks for generated snapshots.
+ 
+ ## Assistant selection rule
+ 
