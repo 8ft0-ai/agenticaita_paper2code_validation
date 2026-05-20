@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""Generate Markdown and JSON issue dashboards from GitHub issue metadata.
+
+This script reads issues with the GitHub CLI. It does not mutate issues, labels,
+milestones, comments, or the curated roadmap.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+STATUS_ORDER = [
+    "status:ready",
+    "status:in-progress",
+    "status:review",
+    "status:blocked",
+    "status:backlog",
+    "status:done",
+]
+PRIORITY_ORDER = ["priority:P0", "priority:P1", "priority:P2"]
+NO_STATUS = "No status"
+NO_PRIORITY = "No priority"
+NO_AREA = "No area"
+NO_MILESTONE = "No milestone"
+
+
+def fetch_issues(repo, state, limit):
+    if shutil.which("gh") is None:
+        raise RuntimeError(
+            "GitHub CLI executable 'gh' was not found. Install gh and run "
+            "'gh auth login' before generating the dashboard."
+        )
+    fields = ",".join(
+        [
+            "assignees",
+            "closedAt",
+            "createdAt",
+            "labels",
+            "milestone",
+            "number",
+            "state",
+            "title",
+            "updatedAt",
+            "url",
+        ]
+    )
+    cmd = [
+        "gh",
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        state,
+        "--limit",
+        str(limit),
+        "--json",
+        fields,
+    ]
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        detail = f": {(exc.stderr or '').strip()}" if exc.stderr else ""
+        raise RuntimeError(
+            f"Unable to fetch issues for {repo}. Check 'gh auth status' and repository access{detail}"
+        ) from exc
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("GitHub CLI returned invalid JSON.") from exc
+    if not isinstance(payload, list):
+        raise RuntimeError("GitHub CLI issue response was not a JSON list.")
+    return payload
+
+
+def names(items, key="name"):
+    values = []
+    for item in items or []:
+        if isinstance(item, dict) and item.get(key):
+            values.append(str(item[key]))
+        elif isinstance(item, str):
+            values.append(item)
+    return sorted(set(values))
+
+
+def pref(labels, prefix):
+    return sorted(label for label in labels if label.startswith(prefix))
+
+
+def milestone(issue):
+    value = issue.get("milestone")
+    if isinstance(value, dict):
+        return value.get("title")
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def warnings_for(labels, status, priority, area, blocked, ready):
+    warnings = []
+    if not area:
+        warnings.append("missing area:*")
+    if not priority:
+        warnings.append("missing priority:*")
+    if not status:
+        warnings.append("missing status:*")
+    if len(status) > 1:
+        warnings.append("multiple status:* labels")
+    if len(priority) > 1:
+        warnings.append("multiple priority:* labels")
+    if ready and "status:blocked" in status:
+        warnings.append("agent-ready combined with status:blocked")
+    if ready and blocked:
+        warnings.append("agent-ready combined with blocked:*")
+    if ready and "needs-human" in labels:
+        warnings.append("agent-ready combined with needs-human")
+    if ready and "needs-acceptance-criteria" in labels:
+        warnings.append("agent-ready combined with needs-acceptance-criteria")
+    return warnings
+
+
+def normalise(raw):
+    labels = names(raw.get("labels"))
+    status = pref(labels, "status:")
+    priority = pref(labels, "priority:")
+    area = pref(labels, "area:")
+    blocked = pref(labels, "blocked:")
+    ready = "agent-ready" in labels
+    return {
+        "number": int(raw["number"]),
+        "title": str(raw.get("title") or ""),
+        "state": str(raw.get("state") or "").lower(),
+        "url": str(raw.get("url") or ""),
+        "labels": labels,
+        "status": status,
+        "priority": priority,
+        "area": area,
+        "size": pref(labels, "size:"),
+        "evidence": pref(labels, "evidence:"),
+        "artifact": pref(labels, "artifact:"),
+        "blocked": blocked,
+        "agent_ready": ready,
+        "milestone": milestone(raw),
+        "assignees": names(raw.get("assignees"), key="login"),
+        "created_at": raw.get("createdAt"),
+        "updated_at": raw.get("updatedAt"),
+        "closed_at": raw.get("closedAt"),
+        "metadata_warnings": warnings_for(labels, status, priority, area, blocked, ready),
+    }
+
+
+def priority_key(issue):
+    for index, label in enumerate(PRIORITY_ORDER):
+        if label in issue["priority"]:
+            return index, label
+    if not issue["priority"]:
+        return len(PRIORITY_ORDER), ""
+    return len(PRIORITY_ORDER) + 1, sorted(issue["priority"])[0]
+
+
+def issue_key(issue):
+    rank, priority = priority_key(issue)
+    state = 0 if issue["state"] == "open" else 1
+    ready = 0 if issue["agent_ready"] else 1
+    return state, rank, priority, ready, issue["number"]
+
+
+def issue_numbers(issues):
+    return [issue["number"] for issue in sorted(issues, key=issue_key)]
+
+
+def ordered(keys, preferred, fallback=None):
+    key_set = set(keys)
+    known = [key for key in preferred if key in key_set]
+    tail = sorted(key for key in key_set if key not in set(preferred + ([fallback] if fallback else [])))
+    if fallback in key_set:
+        tail.append(fallback)
+    return known + tail
+
+
+def group(issues, field, fallback, preferred=None):
+    buckets = {}
+    for issue in issues:
+        values = issue.get(field) or [fallback]
+        for value in values:
+            buckets.setdefault(value, []).append(issue)
+    keys = ordered(buckets, preferred or [], fallback)
+    return {key: issue_numbers(buckets[key]) for key in keys}
+
+
+def build_snapshot(raw_issues, repo, state, limit, generated_at):
+    issues = sorted([normalise(raw) for raw in raw_issues], key=issue_key)
+    ready = [i for i in issues if i["agent_ready"] and "status:blocked" not in i["status"] and not i["blocked"]]
+    blocked = [i for i in issues if "status:blocked" in i["status"] or i["blocked"]]
+    untriaged = [
+        i
+        for i in issues
+        if "needs-triage" in i["labels"] or not i["area"] or not i["priority"] or not i["status"]
+    ]
+    incomplete = [i for i in issues if i["metadata_warnings"]]
+    recently_closed = sorted(
+        [i for i in issues if i["state"] == "closed" and i["closed_at"]],
+        key=lambda i: (i["closed_at"], i["number"]),
+        reverse=True,
+    )[:20]
+    by_milestone = {}
+    for issue in issues:
+        by_milestone.setdefault(issue["milestone"] or NO_MILESTONE, []).append(issue)
+    milestone_keys = ordered(by_milestone, [], NO_MILESTONE)
+    return {
+        "schema_version": "1",
+        "repository": repo,
+        "generated_at_utc": generated_at,
+        "source": {"tool": "gh", "state_filter": state, "limit": limit, "include_pull_requests": False},
+        "summary": {
+            "total": len(issues),
+            "open": sum(1 for i in issues if i["state"] == "open"),
+            "closed": sum(1 for i in issues if i["state"] == "closed"),
+            "agent_ready": len(ready),
+            "blocked": len(blocked),
+            "untriaged": len(untriaged),
+            "metadata_incomplete": len(incomplete),
+        },
+        "groups": {
+            "agent_ready": issue_numbers(ready),
+            "blocked": issue_numbers(blocked),
+            "by_status": group(issues, "status", NO_STATUS, STATUS_ORDER),
+            "by_priority": group(issues, "priority", NO_PRIORITY, PRIORITY_ORDER),
+            "by_area": group(issues, "area", NO_AREA),
+            "by_milestone": {key: issue_numbers(by_milestone[key]) for key in milestone_keys},
+            "metadata_incomplete": issue_numbers(incomplete),
+            "recently_closed": [i["number"] for i in recently_closed],
+        },
+        "issues": issues,
+    }
+
+
+def issue_map(snapshot):
+    return {issue["number"]: issue for issue in snapshot["issues"]}
+
+
+def labels_text(issue):
+    labels = []
+    for field in ["status", "priority", "area", "blocked"]:
+        labels.extend(issue[field])
+    if issue["agent_ready"]:
+        labels.append("agent-ready")
+    return ", ".join(f"`{label}`" for label in labels) if labels else "-"
+
+
+def table(numbers, issues):
+    rows = ["| Issue | Title | Labels | Milestone | Assignees |", "| --- | --- | --- | --- | --- |"]
+    if not numbers:
+        rows.append("| - | No issues | - | - | - |")
+        return rows
+    for number in numbers:
+        issue = issues[number]
+        link = f"[#{number}]({issue['url']})"
+        assignees = ", ".join(f"`{a}`" for a in issue["assignees"]) if issue["assignees"] else "-"
+        rows.append(f"| {link} | {issue['title']} | {labels_text(issue)} | {issue['milestone'] or '-'} | {assignees} |")
+    return rows
+
+
+def render_markdown(snapshot):
+    issues = issue_map(snapshot)
+    summary = snapshot["summary"]
+    groups = snapshot["groups"]
+    lines = [
+        "# Issue Dashboard",
+        "",
+        "This dashboard is generated from GitHub issue metadata. It is a factual snapshot and does not replace `docs/roadmap.md`.",
+        "",
+        "## Generation metadata",
+        "",
+        f"- Repository: `{snapshot['repository']}`",
+        f"- Generated at UTC: `{snapshot['generated_at_utc']}`",
+        f"- Source tool: `{snapshot['source']['tool']}`",
+        f"- Issue state filter: `{snapshot['source']['state_filter']}`",
+        f"- Issue limit: `{snapshot['source']['limit']}`",
+        "",
+        "## Summary counts",
+        "",
+        "| Metric | Count |",
+        "| --- | ---: |",
+    ]
+    for key in ["total", "open", "closed", "agent_ready", "blocked", "untriaged", "metadata_incomplete"]:
+        lines.append(f"| {key.replace('_', ' ').title()} | {summary[key]} |")
+    for title, numbers in [("Agent-ready issues", groups["agent_ready"]), ("Blocked issues", groups["blocked"])]:
+        lines.extend(["", f"## {title}", "", *table(numbers, issues)])
+    for title, grouped in [
+        ("Issues by status", groups["by_status"]),
+        ("Issues by priority", groups["by_priority"]),
+        ("Issues by area", groups["by_area"]),
+        ("Issues by milestone", groups["by_milestone"]),
+    ]:
+        lines.extend(["", f"## {title}", ""])
+        for name, numbers in grouped.items():
+            lines.extend([f"### {name}", "", *table(numbers, issues), ""])
+    lines.extend(["## Metadata-incomplete issues", "", "| Issue | Title | Warnings |", "| --- | --- | --- |"])
+    if groups["metadata_incomplete"]:
+        for number in groups["metadata_incomplete"]:
+            issue = issues[number]
+            lines.append(f"| [#{number}]({issue['url']}) | {issue['title']} | {', '.join(issue['metadata_warnings'])} |")
+    else:
+        lines.append("| - | No issues | - |")
+    lines.extend(["", "## Recently closed issues", "", *table(groups["recently_closed"], issues), ""])
+    return "\n".join(lines)
+
+
+def write_output(path, text, label):
+    if path is None:
+        return
+    if path == "-":
+        print(text)
+        return
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    print(f"Wrote {label} to {target}", file=sys.stderr)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", required=True, help="Repository in owner/name form.")
+    parser.add_argument("--state", choices=["open", "closed", "all"], default="open")
+    parser.add_argument("--limit", type=int, default=200)
+    parser.add_argument("--markdown-output", "--out-md", default="-", help="Path or '-' for stdout.")
+    parser.add_argument("--json-output", "--out-json", default=None, help="Optional path or '-' for stdout.")
+    parser.add_argument("--no-markdown", action="store_true", help="Suppress Markdown output.")
+    parser.add_argument("--generated-at-utc", help="Override the generation timestamp for deterministic tests.")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    markdown_path = None if args.no_markdown else args.markdown_output
+    if markdown_path is None and args.json_output is None:
+        raise SystemExit("Nothing to write: remove --no-markdown or provide --json-output.")
+    if markdown_path == "-" and args.json_output == "-":
+        raise SystemExit("Markdown and JSON cannot both be written to stdout.")
+    generated_at = args.generated_at_utc or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    snapshot = build_snapshot(fetch_issues(args.repo, args.state, args.limit), args.repo, args.state, args.limit, generated_at)
+    write_output(markdown_path, render_markdown(snapshot), "Markdown dashboard")
+    write_output(args.json_output, json.dumps(snapshot, indent=2) + "\n", "JSON dashboard")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
