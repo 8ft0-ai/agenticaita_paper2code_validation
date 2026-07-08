@@ -1,0 +1,45 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 98,
+  "base_ref": "main",
+  "base_sha": "887b85619eb48d0daa134a8174777fa1db11d4cd",
+  "implementation_branch": "ai/issue-98-fix-workflow-dispatch-input-types",
+  "commit_message": "Fix workflow dispatch input types",
+  "pr_title": "Fix workflow_dispatch input types for manual report workflows",
+  "pr_body": "Closes #98\n\n## Summary\n\nFixes the remaining manual workflow startup failure by replacing unsupported `workflow_dispatch` number inputs with conservative string inputs.\n\n## Changes\n\n- Updates `.github/workflows/generate-issue-dashboard.yml` so `limit` uses `type: string`.\n- Updates `.github/workflows/check-issue-hygiene.yml` so `limit` uses `type: string`.\n- Keeps both workflows manually triggered, read-only, report-only, and artefact-based.\n\n## Validation\n\n- `git apply --check /tmp/issue98.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow YAML and command paths reviewed.\n- Runtime validation still needs to be repeated after merge by rerunning #91 and then #93.",
+  "validation": [
+    "git apply --check /tmp/issue98.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow YAML and command paths reviewed.",
+    "Runtime validation still needs to be repeated after merge by rerunning #91 and then #93."
+  ],
+  "allow_workflow_changes": true
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/.github/workflows/check-issue-hygiene.yml b/.github/workflows/check-issue-hygiene.yml
+index 1d82436..c22cab7 100644
+--- a/.github/workflows/check-issue-hygiene.yml
++++ b/.github/workflows/check-issue-hygiene.yml
+@@ -18,7 +18,7 @@ on:
+         description: Maximum number of issues to fetch.
+         required: true
+         default: 200
+-        type: number
++        type: string
+       strict:
+         description: Fail the workflow when metadata warnings are found.
+         required: true
+diff --git a/.github/workflows/generate-issue-dashboard.yml b/.github/workflows/generate-issue-dashboard.yml
+index 23ef2c9..665f4aa 100644
+--- a/.github/workflows/generate-issue-dashboard.yml
++++ b/.github/workflows/generate-issue-dashboard.yml
+@@ -18,7 +18,7 @@ on:
+         description: Maximum number of issues to fetch.
+         required: true
+         default: 200
+-        type: number
++        type: string
+ 
+ permissions: read-all
+ 
