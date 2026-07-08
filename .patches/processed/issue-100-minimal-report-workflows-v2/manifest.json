@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "bd41881347fec0176d6cf827fb45ee150790ba36",
+  "commit_message": "Replace report workflows with minimal definitions",
+  "implementation_branch": "ai/issue-100-minimal-report-workflows-v2",
+  "issue_number": 100,
+  "pr_body": "Closes #100\n\n## Summary\n\nReplaces the manual dashboard and hygiene report workflows with minimal workflow_dispatch definitions after repeated startup failures before job creation.\n\n## Changes\n\n- Simplifies `.github/workflows/generate-issue-dashboard.yml` to fixed `open` / `200` execution.\n- Simplifies `.github/workflows/check-issue-hygiene.yml` to fixed `all` / `200` report-only execution.\n- Removes dispatch inputs, explicit permissions blocks, expression-heavy job env values, and the truncated hygiene summary shell block.\n- Keeps Markdown and JSON reports as workflow artefacts only.\n\n## Validation\n\n- `git apply --check /tmp/issue100v2.diff` on the exact v2 unified diff in a clean temporary git worktree.\n- Workflow YAML and command paths reviewed.\n- Runtime validation still needs to be repeated after merge by rerunning #91 and #93.",
+  "pr_title": "Replace manual report workflows with minimal startup-safe definitions",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue100v2.diff on the exact v2 unified diff in a clean temporary git worktree.",
+    "Workflow YAML and command paths reviewed.",
+    "Runtime validation still needs to be repeated after merge by rerunning #91 and #93."
+  ]
+}
