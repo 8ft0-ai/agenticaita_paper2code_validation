@@ -16,7 +16,7 @@ on:
         description: Maximum number of issues to fetch.
         required: true
         default: 200
-        type: number
+        type: string
 
 permissions: read-all
 

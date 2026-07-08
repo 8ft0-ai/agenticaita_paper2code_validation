@@ -16,7 +16,7 @@ on:
         description: Maximum number of issues to fetch.
         required: true
         default: 200
-        type: number
+        type: string
       strict:
         description: Fail the workflow when metadata warnings are found.
         required: true
