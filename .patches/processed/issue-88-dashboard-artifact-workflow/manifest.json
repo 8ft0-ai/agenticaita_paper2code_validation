@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "8d843fa29318455fe1e4e03509ad85f22f77fa1a",
+  "commit_message": "Publish issue dashboard as Actions artefact",
+  "implementation_branch": "ai/issue-88-dashboard-artifact-workflow",
+  "issue_number": 88,
+  "pr_body": "Closes #88\n\n## Summary\n\nAdds a manual GitHub Actions workflow that generates the issue dashboard and uploads Markdown and JSON dashboard outputs as workflow artefacts.\n\n## Changes\n\n- Adds `.github/workflows/generate-issue-dashboard.yml`.\n- Provides `workflow_dispatch` inputs for issue state and fetch limit.\n- Runs `scripts/generate_issue_dashboard.py` using the current repository and GitHub Actions token.\n- Uploads `issue_dashboard.md` and `issue_dashboard.json` as an Actions artefact.\n- Writes a job summary with repository, state filter, issue limit, artefact name, and retention policy.\n\n## Validation\n\n- `git apply --check /tmp/issue88.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow YAML and command paths reviewed.\n- Runtime workflow execution skipped until after merge because the workflow is only available on the default branch after merge.",
+  "pr_title": "Publish issue dashboard as manual Actions artefact",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue88.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow YAML and command paths reviewed.",
+    "Runtime workflow execution skipped until after merge because the workflow is only available on the default branch after merge."
+  ]
+}

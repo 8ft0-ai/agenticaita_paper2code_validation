@@ -1,0 +1,89 @@
+diff --git a/.github/workflows/generate-issue-dashboard.yml b/.github/workflows/generate-issue-dashboard.yml
+new file mode 100644
+index 0000000..9563ca1
+--- /dev/null
++++ b/.github/workflows/generate-issue-dashboard.yml
+@@ -0,0 +1,83 @@
++name: Generate issue dashboard
++
++on:
++  workflow_dispatch:
++    inputs:
++      state:
++        description: Issue state filter for the generated dashboard.
++        required: true
++        default: open
++        type: choice
++        options:
++          - open
++          - closed
++          - all
++      limit:
++        description: Maximum number of issues to fetch.
++        required: true
++        default: 200
++        type: number
++
++permissions:
++  contents: read
++  issues: read
++
++jobs:
++  generate-dashboard:
++    name: Generate issue dashboard artefact
++    runs-on: ubuntu-latest
++    env:
++      GH_TOKEN: ${{ github.token }}
++      TARGET_REPO: ${{ github.repository }}
++      ISSUE_STATE: ${{ inputs.state }}
++      ISSUE_LIMIT: ${{ inputs.limit }}
++      DASHBOARD_DIR: ${{ runner.temp }}/issue-dashboard
++      ARTIFACT_NAME: issue-dashboard-${{ inputs.state }}
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: "3.x"
++
++      - name: Generate dashboard files
++        shell: bash
++        run: |
++          set -euo pipefail
++          mkdir -p "$DASHBOARD_DIR"
++
++          python scripts/generate_issue_dashboard.py \
++            --repo "$TARGET_REPO" \
++            --state "$ISSUE_STATE" \
++            --limit "$ISSUE_LIMIT" \
++            --markdown-output "$DASHBOARD_DIR/issue_dashboard.md" \
++            --json-output "$DASHBOARD_DIR/issue_dashboard.json"
++
++      - name: Upload dashboard artefact
++        uses: actions/upload-artifact@v4
++        with:
++          name: ${{ env.ARTIFACT_NAME }}
++          path: |
++            ${{ runner.temp }}/issue-dashboard/issue_dashboard.md
++            ${{ runner.temp }}/issue-dashboard/issue_dashboard.json
++          if-no-files-found: error
++          retention-days: 14
++
++      - name: Write job summary
++        if: always()
++        shell: bash
++        run: |
++          {
++            echo "## Issue dashboard artefact"
++            echo
++            echo "- Repository: \`$TARGET_REPO\`"
++            echo "- Issue state filter: \`$ISSUE_STATE\`"
++            echo "- Issue limit: \`$ISSUE_LIMIT\`"
++            echo "- Artefact name: \`$ARTIFACT_NAME\`"
++            echo "- Retention: \`14 days\`"
++            echo
++            echo "Generated files are uploaded as workflow artefacts only."
++            echo "This workflow does not commit \`docs/issue_dashboard.md\`, commit \`docs/issue_dashboard.json\`, mutate issues, or replace \`docs/roadmap.md\`."
++          } >> "$GITHUB_STEP_SUMMARY"
