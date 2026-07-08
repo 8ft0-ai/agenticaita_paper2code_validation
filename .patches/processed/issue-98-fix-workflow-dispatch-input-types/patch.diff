@@ -1,0 +1,26 @@
+diff --git a/.github/workflows/check-issue-hygiene.yml b/.github/workflows/check-issue-hygiene.yml
+index 1d82436..c22cab7 100644
+--- a/.github/workflows/check-issue-hygiene.yml
++++ b/.github/workflows/check-issue-hygiene.yml
+@@ -18,7 +18,7 @@ on:
+         description: Maximum number of issues to fetch.
+         required: true
+         default: 200
+-        type: number
++        type: string
+       strict:
+         description: Fail the workflow when metadata warnings are found.
+         required: true
+diff --git a/.github/workflows/generate-issue-dashboard.yml b/.github/workflows/generate-issue-dashboard.yml
+index 23ef2c9..665f4aa 100644
+--- a/.github/workflows/generate-issue-dashboard.yml
++++ b/.github/workflows/generate-issue-dashboard.yml
+@@ -18,7 +18,7 @@ on:
+         description: Maximum number of issues to fetch.
+         required: true
+         default: 200
+-        type: number
++        type: string
+ 
+ permissions: read-all
+ 

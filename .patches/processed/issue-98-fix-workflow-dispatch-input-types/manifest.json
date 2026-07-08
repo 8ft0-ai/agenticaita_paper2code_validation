@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "887b85619eb48d0daa134a8174777fa1db11d4cd",
+  "commit_message": "Fix workflow dispatch input types",
+  "implementation_branch": "ai/issue-98-fix-workflow-dispatch-input-types",
+  "issue_number": 98,
+  "pr_body": "Closes #98\n\n## Summary\n\nFixes the remaining manual workflow startup failure by replacing unsupported `workflow_dispatch` number inputs with conservative string inputs.\n\n## Changes\n\n- Updates `.github/workflows/generate-issue-dashboard.yml` so `limit` uses `type: string`.\n- Updates `.github/workflows/check-issue-hygiene.yml` so `limit` uses `type: string`.\n- Keeps both workflows manually triggered, read-only, report-only, and artefact-based.\n\n## Validation\n\n- `git apply --check /tmp/issue98.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow YAML and command paths reviewed.\n- Runtime validation still needs to be repeated after merge by rerunning #91 and then #93.",
+  "pr_title": "Fix workflow_dispatch input types for manual report workflows",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue98.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow YAML and command paths reviewed.",
+    "Runtime validation still needs to be repeated after merge by rerunning #91 and then #93."
+  ]
+}
