@@ -1,0 +1,17 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Add OpenRouter LLM provider abstraction",
+  "implementation_branch": "ai/issue-102-llm-provider",
+  "issue_number": 102,
+  "pr_body": "Closes #102\n\n## Summary\n\nAdds a pluggable LLM provider boundary for the replication harness and implements an OpenRouter-backed provider using the OpenAI-compatible chat completion API.\n\n## Changes\n\n- Add `src.agenticaita.llm` with `LLMProvider`, `LLMConfig`, `OpenRouterProvider`, JSON parsing helpers, audit logging, and provider factory support.\n- Add an `llm:` section to `replication/config.yaml` with OpenRouter defaults, model, API-key environment variable, deterministic temperature, token budget, timeout, and audit log path.\n- Add mocked unit tests covering importability, request construction, env/config API-key lookup, JSON response parsing, fenced JSON handling, audit logging without secrets, and provider factory creation.\n\n## Validation\n\n- `cd replication && python -m pytest tests/test_llm.py -q`\n- `cd replication && python -c \"from src.agenticaita.llm import OpenRouterProvider; print('import ok')\"`\n- `cd replication && python -m compileall -q src/agenticaita/llm.py`\n- `git apply --check /mnt/data/issue102.patch`",
+  "pr_title": "Add OpenRouter LLM provider abstraction",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /mnt/data/issue102.patch",
+    "cd replication && python -m pytest tests/test_llm.py -q (5 passed)",
+    "cd replication && python -c \"from src.agenticaita.llm import OpenRouterProvider; print('import ok')\"",
+    "cd replication && python -m compileall -q src/agenticaita/llm.py"
+  ]
+}
