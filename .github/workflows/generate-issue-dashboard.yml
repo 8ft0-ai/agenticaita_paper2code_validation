@@ -18,9 +18,7 @@ on:
         default: 200
         type: number
 
-permissions:
-  contents: read
-  issues: read
+permissions: read-all
 
 jobs:
   generate-dashboard:
