@@ -1,0 +1,314 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 103,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-103-llm-agents",
+  "commit_message": "Wire LLM-backed replication agents",
+  "pr_title": "Wire LLM-backed replication agents",
+  "pr_body": "Closes #103\n\n## Summary\n\nWires LLM-backed Analyst and Risk Manager agents into the replication harness while preserving deterministic fallbacks for offline runs and tests.\n\n## Changes\n\n- Add LLM-backed Analyst and Risk Manager agents using the paper JSON prompts and contracts.\n- Preserve Risk Manager Layer A deterministic hard gates before any LLM call.\n- Add episodic memory briefing from prior per-asset analyst reasoning in the simulator.\n- Add `--agents llm` CLI support and config-driven agent selection.\n- Add mocked unit tests covering LLM contracts, fallback behaviour, hard-gate preservation, and memory injection.\n\n## Validation\n\n- `git apply --check /mnt/data/issue103_tiny.patch`\n- `cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q`\n- `cd replication && python -c \"from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager; print('import ok')\"`\n- `cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/simulator.py replicate.py`\n- `cd replication && python replicate.py --config config.yaml --input-csv /mnt/data/issue103_tiny_cli_input.csv --out /mnt/data/issue103_tiny_cli_out --agents llm`",
+  "validation": [
+    "git apply --check /mnt/data/issue103_tiny.patch",
+    "cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q (8 passed)",
+    "cd replication && python -c \"from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager; print('import ok')\"",
+    "cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/simulator.py replicate.py",
+    "cd replication && python replicate.py --config config.yaml --input-csv /mnt/data/issue103_tiny_cli_input.csv --out /mnt/data/issue103_tiny_cli_out --agents llm (passed with deterministic fallbacks because no OPENROUTER_API_KEY was set)"
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/replication/config.yaml b/replication/config.yaml
+index f6384fe..cc6acc2 100644
+--- a/replication/config.yaml
++++ b/replication/config.yaml
+@@ -28,6 +28,10 @@ llm:
+   max_tokens: 512
+   audit_log_path: results/llm_audit.jsonl
+   timeout_seconds: 60
++agents:
++  analyst: deterministic
++  risk_manager: deterministic
++  episodic_memory_depth: 5
+ cost_scenarios:
+   zero_cost: 0.0
+   conservative_maker_only: 0.0004
+diff --git a/replication/replicate.py b/replication/replicate.py
+index 7968cb6..6031955 100644
+--- a/replication/replicate.py
++++ b/replication/replicate.py
+@@ -13,6 +13,8 @@ from src.agenticaita.data import generate_synthetic_ohlcv, load_ohlcv_csv
+ from src.agenticaita.metrics import funding_accounting, summarise, transaction_cost_sensitivity
+ from src.agenticaita.risk import RiskConfig
+ from src.agenticaita.agents import AnalystConfig
++from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
++from src.agenticaita.llm import build_llm_provider
+ from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_sqlite
+ 
+ 
+@@ -43,6 +45,8 @@ def build_config_metadata(cfg: dict) -> dict:
+         "igp": dict(cfg["igp"]),
+         "risk": dict(cfg["risk"]),
+         "cbd": dict(cfg["cbd"]),
++        "agents": dict(cfg.get("agents", {})),
++        "llm": {k: v for k, v in dict(cfg.get("llm", {})).items() if k != "api_key"},
+         "cost_scenarios": dict(cfg["cost_scenarios"]),
+         "synthetic_data": dict(cfg.get("synthetic_data", {})),
+     }
+@@ -86,9 +90,13 @@ def main() -> None:
+     parser.add_argument("--config", default="config.yaml")
+     parser.add_argument("--input-csv", default=None, help="Optional OHLCV CSV with timestamp,asset,close columns")
+     parser.add_argument("--out", default=None)
++    parser.add_argument("--agents", choices=["deterministic", "llm"], default=None)
+     args = parser.parse_args()
+ 
+     cfg = load_config(Path(args.config))
++    cfg.setdefault("agents", {"analyst": "deterministic", "risk_manager": "deterministic", "episodic_memory_depth": 5})
++    if args.agents:
++        cfg["agents"].update({"analyst": args.agents, "risk_manager": args.agents})
+     out_dir = Path(args.out or cfg["experiment"]["output_dir"])
+     out_dir.mkdir(parents=True, exist_ok=True)
+ 
+@@ -123,7 +131,13 @@ def main() -> None:
+         max_position_size_usd=float(cfg["risk"]["max_position_size_usd"]),
+     )
+     analyst_cfg = AnalystConfig(base_position_size_usd=float(cfg["risk"]["base_position_size_usd"]))
+-    simulator = PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg)
++    agent_cfg = cfg.get("agents", {})
++    analyst_agent = risk_manager = None
++    if "llm" in {agent_cfg.get("analyst"), agent_cfg.get("risk_manager")}:
++        provider = build_llm_provider(cfg)
++        analyst_agent = LLMAnalyst(provider, analyst_cfg) if agent_cfg.get("analyst") == "llm" else None
++        risk_manager = LLMRiskManager(provider, risk_cfg) if agent_cfg.get("risk_manager") == "llm" else None
++    simulator = PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg, analyst_agent=analyst_agent, risk_manager=risk_manager, episodic_memory_depth=int(agent_cfg.get("episodic_memory_depth", 0)))
+     pipeline_log, trades, vol_history = simulator.run(ohlcv)
+     summary = summarise(pipeline_log, trades)
+ 
+@@ -159,7 +173,7 @@ def main() -> None:
+         "summary": summary.to_dict(),
+         "benchmark_modes": funding,
+         "transaction_cost_sensitivity": costs,
+-        "caveat": "Synthetic data and deterministic proxy agents do not validate the paper's live-market claims.",
++        "caveat": "Synthetic data and proxy or fallback agents do not validate the paper's live-market claims.",
+     }
+     (out_dir / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+     md = [
+diff --git a/replication/src/agenticaita/agents.py b/replication/src/agenticaita/agents.py
+index f2fe488..9b3c80d 100644
+--- a/replication/src/agenticaita/agents.py
++++ b/replication/src/agenticaita/agents.py
+@@ -31,7 +31,7 @@ class RuleBasedAnalyst:
+     def __init__(self, config: AnalystConfig | None = None) -> None:
+         self.config = config or AnalystConfig()
+ 
+-    def decide(self, event: TriggerEvent, cbd: CBDResult) -> AnalystDecision:
++    def decide(self, event: TriggerEvent, cbd: CBDResult, episodic_memory: list[str] | None = None) -> AnalystDecision:
+         signal = "long" if event.signed_return > 0 else "short"
+         confidence = max(0.0, min(1.0, 0.50 + 0.08 * min(event.z_score, 5.0) + 0.20 * cbd.omega))
+         if confidence < self.config.min_confidence_to_trade:
+diff --git a/replication/src/agenticaita/agents_llm.py b/replication/src/agenticaita/agents_llm.py
+new file mode 100644
+index 0000000..f9a2040
+--- /dev/null
++++ b/replication/src/agenticaita/agents_llm.py
+@@ -0,0 +1,58 @@
++"""LLM-backed AgenticAITA agents."""
++from __future__ import annotations
++import json, logging
++from dataclasses import asdict
++from typing import Any, Mapping
++from .agents import AnalystConfig, RuleBasedAnalyst
++from .azte import TriggerEvent
++from .cbd import CBDResult
++from .contracts import AnalystDecision, RiskDecision
++from .llm import LLMError, LLMProvider
++from .risk import DeterministicRiskManager, RiskConfig
++LOG = logging.getLogger(__name__)
++ANALYST_PROMPT = "You are the AgenticAITA Analyst. Analyze the market and produce a trading signal. Respond ONLY in JSON: {signal: long|short|wait, confidence: float[0,1], entry_price, stop_loss, take_profit, size_usd, reasoning: string}. Your reasoning MUST cite the composite score, volatility regime, and orderbook context explicitly."
++RISK_PROMPT = "You are the AgenticAITA Risk Manager. Your goal is Proportional Portfolio Balancing. Calculate size_usd based on the Analyst's confidence. Respond ONLY in JSON: {approved: bool, size_usd: float, negotiation_summary: string}."
++
++class LLMAnalyst:
++    def __init__(self, provider: LLMProvider, config: AnalystConfig | None = None) -> None:
++        self.provider, self.fallback, self.last_warning, self.last_prompt = provider, RuleBasedAnalyst(config), "", ""
++    def decide(self, event: TriggerEvent, cbd: CBDResult, episodic_memory: list[str] | None = None) -> AnalystDecision:
++        self.last_warning = ""; self.last_prompt = analyst_message(event, cbd, episodic_memory or [])
++        try: return analyst_json(self.provider.complete(ANALYST_PROMPT, self.last_prompt), event, cbd)
++        except (LLMError, KeyError, TypeError, ValueError) as exc:
++            self.last_warning = f"LLMAnalyst fallback to deterministic proxy: {exc}"; LOG.warning(self.last_warning)
++            return self.fallback.decide(event, cbd, episodic_memory)
++
++class LLMRiskManager:
++    def __init__(self, provider: LLMProvider, config: RiskConfig | None = None) -> None:
++        self.provider, self.config, self.last_warning, self.last_prompt = provider, config or RiskConfig(), "", ""
++        self.layer_a = DeterministicRiskManager(self.config)
++    def evaluate(self, decision: AnalystDecision) -> RiskDecision:
++        self.last_warning = ""; gate = self.layer_a.evaluate(decision)
++        if not gate.approved: return gate
++        self.last_prompt = json.dumps({"analyst_decision": decision.to_dict(), "layer_a": gate.to_dict()}, sort_keys=True)
++        try: return risk_json(self.provider.complete(RISK_PROMPT, self.last_prompt), self.config)
++        except (LLMError, KeyError, TypeError, ValueError) as exc:
++            self.last_warning = f"LLMRiskManager fallback to deterministic approval: {exc}"; LOG.warning(self.last_warning)
++            return gate
++
++def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str]) -> str:
++    regime = "high" if event.z_score >= 3 or event.abs_return >= 0.01 else "active" if event.z_score >= 2 or event.abs_return >= 0.003 else "low"
++    return json.dumps({"trigger": asdict(event), "cbd": asdict(cbd), "composite_score": cbd.omega, "volatility_regime": regime, "orderbook_context": "not available; OHLCV trigger context is used as proxy", "episodic_memory_briefing": memory[-5:] or ["No prior reasoning on this asset is available."]}, sort_keys=True)
++
++def analyst_json(p: Mapping[str, Any], e: TriggerEvent, c: CBDResult) -> AnalystDecision:
++    signal = str(p["signal"]).lower(); reason = str(p.get("reasoning", "")).strip()
++    if signal not in {"long", "short", "wait"} or not reason: raise ValueError("invalid analyst JSON contract")
++    return AnalystDecision(e.asset, signal, f(p["confidence"], 0, 1), f(p.get("entry_price", e.price), 0, None), float(p.get("stop_loss", e.price)), float(p.get("take_profit", e.price)), f(p["size_usd"], 0, None), c.omega, e.z_score, reason)  # type: ignore[arg-type]
++
++def risk_json(p: Mapping[str, Any], c: RiskConfig) -> RiskDecision:
++    approved = p["approved"] if isinstance(p["approved"], bool) else str(p["approved"]).lower() == "true"; summary = str(p.get("negotiation_summary", "")).strip()
++    if not summary: raise ValueError("invalid risk JSON contract")
++    if not approved: return RiskDecision(False, 0.0, "llm_layer_b_rejected", summary)
++    size = f(p["size_usd"], 0, c.max_position_size_usd)
++    return RiskDecision(size > 0, size if size > 0 else 0.0, "" if size > 0 else "llm_layer_b_zero_size", summary)
++
++def f(v: Any, lo: float | None, hi: float | None) -> float:
++    x = float(v)
++    if (lo is not None and x < lo) or (hi is not None and x > hi): raise ValueError("number outside bounds")
++    return x
+diff --git a/replication/src/agenticaita/simulator.py b/replication/src/agenticaita/simulator.py
+index 300a902..34e219b 100644
+--- a/replication/src/agenticaita/simulator.py
++++ b/replication/src/agenticaita/simulator.py
+@@ -5,16 +5,21 @@ import sqlite3
+ from collections import defaultdict, deque
+ from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Deque, Dict
++from typing import Deque, Dict, Protocol
+ 
+ import pandas as pd
+ 
+ from .agents import AnalystConfig, RuleBasedAnalyst
+ from .azte import AdaptiveZScoreTriggerEngine, VolSample
+ from .cbd import CBDInputs, cbd_score
+-from .contracts import ExecutionRecord
++from .contracts import AnalystDecision, ExecutionRecord, RiskDecision
+ from .risk import DeterministicRiskManager, RiskConfig
+ 
++class AnalystAgent(Protocol):
++    def decide(self, event, cbd, episodic_memory: list[str] | None = None) -> AnalystDecision: ...
++class RiskManagerAgent(Protocol):
++    def evaluate(self, decision: AnalystDecision) -> RiskDecision: ...
++
+ 
+ @dataclass(frozen=True)
+ class SimulatorConfig:
+@@ -41,15 +46,16 @@ class ExitResult:
+ class PipelineSimulator:
+     """Runs AZTE -> Analyst -> Risk Manager -> Executor over OHLCV closes."""
+ 
+-    def __init__(self, config: SimulatorConfig | None = None, risk: RiskConfig | None = None, analyst: AnalystConfig | None = None) -> None:
++    def __init__(self, config: SimulatorConfig | None = None, risk: RiskConfig | None = None, analyst: AnalystConfig | None = None, analyst_agent: AnalystAgent | None = None, risk_manager: RiskManagerAgent | None = None, episodic_memory_depth: int = 0) -> None:
+         self.config = config or SimulatorConfig()
+         self.azte = AdaptiveZScoreTriggerEngine(
+             window=self.config.rolling_window,
+             z_threshold=self.config.z_threshold,
+             absolute_return_floor=self.config.absolute_return_floor,
+         )
+-        self.analyst = RuleBasedAnalyst(analyst)
+-        self.risk = DeterministicRiskManager(risk)
++        self.analyst = analyst_agent or RuleBasedAnalyst(analyst)
++        self.risk = risk_manager or DeterministicRiskManager(risk)
++        self.episodic_memory_depth = max(0, int(episodic_memory_depth))
+         self.price_windows: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=self.config.rolling_window))
+         self.pipeline_log: list[dict] = []
+         self.vol_history: list[dict] = []
+@@ -112,6 +118,13 @@ class PipelineSimulator:
+             return self._ohlcv_exit(decision.asset, timestamp, decision)
+         return self._close_only_exit(decision.asset, timestamp, decision.entry_price)
+ 
++    def _episodic_memory(self, asset: str) -> list[str]:
++        rows = [str(r.get("analyst_reasoning", "")) for r in self.pipeline_log if r.get("asset") == asset and r.get("analyst_reasoning")]
++        return rows[-self.episodic_memory_depth :] if self.episodic_memory_depth else []
++
++    def _agent_warnings(self) -> str:
++        return " | ".join(str(w) for a in (self.analyst, self.risk) if (w := getattr(a, "last_warning", "")))
++
+     def _execute(self, timestamp: pd.Timestamp, decision, size_usd: float) -> ExecutionRecord:
+         exit_result = self._exit_for_decision(timestamp, decision)
+         direction = 1.0 if decision.signal == "long" else -1.0
+@@ -165,8 +178,9 @@ class PipelineSimulator:
+             benchmark_prices = list(self.price_windows[self.config.benchmark_asset])
+             asset_prices = list(self.price_windows[asset])
+             cbd = cbd_score(CBDInputs(event.z_score, asset_prices, benchmark_prices, self.config.cbd_alpha, self.config.cbd_kappa))
+-            analyst_decision = self.analyst.decide(event, cbd)
++            analyst_decision = self.analyst.decide(event, cbd, self._episodic_memory(asset))
+             risk_decision = self.risk.evaluate(analyst_decision)
++            agent_warnings = self._agent_warnings()
+             self.pipeline_log.append({
+                 "timestamp": str(timestamp),
+                 "asset": asset,
+@@ -180,6 +194,7 @@ class PipelineSimulator:
+                 "risk_rejection_reason": risk_decision.rejection_reason,
+                 "analyst_reasoning": analyst_decision.reasoning,
+                 "risk_summary": risk_decision.negotiation_summary,
++                "agent_warnings": agent_warnings,
+             })
+             if risk_decision.approved:
+                 self.trades.append(self._execute(timestamp, analyst_decision, risk_decision.size_usd).to_dict())
+diff --git a/replication/tests/test_agents_llm.py b/replication/tests/test_agents_llm.py
+new file mode 100644
+index 0000000..855fcbf
+--- /dev/null
++++ b/replication/tests/test_agents_llm.py
+@@ -0,0 +1,54 @@
++from __future__ import annotations
++import sqlite3
++from pathlib import Path
++import pytest
++from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
++from src.agenticaita.azte import TriggerEvent
++from src.agenticaita.cbd import CBDResult
++from src.agenticaita.contracts import AnalystDecision
++from src.agenticaita.llm import LLMError
++from src.agenticaita.risk import RiskConfig
++from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_sqlite
++
++class FakeProvider:
++    def __init__(self, responses=None, error=None):
++        self.responses, self.error, self.calls = responses or [], error, []
++    def complete(self, system_prompt, user_message):
++        self.calls.append((system_prompt, user_message))
++        if self.error: raise self.error
++        return self.responses.pop(0)
++
++def ev(): return TriggerEvent("2026-04-06T00:31:00Z", "BTC", 100, 0.004, 0.004, 0.001, 0.001, 3, "z_score")
++def cb(): return CBDResult(0.39, 0.2, 0.8, 0.6)
++
++def test_llm_analyst_contract_memory_and_fallback():
++    p = FakeProvider([{"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":99,"take_profit":102,"size_usd":188,"reasoning":"Composite score 0.60, active volatility regime, orderbook context unavailable."}])
++    d = LLMAnalyst(p).decide(ev(), cb(), ["prior BTC reasoning"])
++    assert d == AnalystDecision("BTC", "long", 0.7, 100.0, 99.0, 102.0, 188.0, 0.6, 3, d.reasoning)
++    assert "prior BTC reasoning" in p.calls[0][1]
++    assert LLMAnalyst(FakeProvider(error=LLMError("bad json"))).decide(ev(), cb()).signal in {"long", "short", "wait"}
++
++def test_llm_risk_manager_preserves_hard_gate_and_uses_layer_b():
++    p = FakeProvider([{"approved":True,"size_usd":120,"negotiation_summary":"Reduced size for proportional balancing."}])
++    m = LLMRiskManager(p, RiskConfig(confidence_gate=0.6))
++    assert not m.evaluate(AnalystDecision("BTC","wait",0.9,100,100,100,188,0.6,3,"wait")).approved
++    assert p.calls == []
++    r = m.evaluate(AnalystDecision("BTC","long",0.9,100,99,102,188,0.6,3,"test"))
++    assert r.approved and r.size_usd == 120.0 and len(p.calls) == 1
++
++def test_pipeline_memory_and_sqlite(tmp_path: Path):
++    pd = pytest.importorskip("pandas")
++    p = FakeProvider([
++        {"signal":"long","confidence":0.9,"entry_price":100.5,"stop_loss":99.5,"take_profit":102,"size_usd":100,"reasoning":"Composite score first, active volatility regime, orderbook context unavailable."},
++        {"approved":True,"size_usd":100,"negotiation_summary":"Approved first."},
++        {"signal":"long","confidence":0.9,"entry_price":101.2,"stop_loss":100.2,"take_profit":103,"size_usd":100,"reasoning":"Composite score second, active volatility regime, orderbook context unavailable."},
++        {"approved":True,"size_usd":100,"negotiation_summary":"Approved second."},
++    ])
++    sim = PipelineSimulator(SimulatorConfig(rolling_window=3,z_threshold=99,absolute_return_floor=0.003,global_cooldown_seconds=0,per_asset_cooldown_seconds=0,benchmark_asset="BTC",exit_horizon_minutes=1), analyst_agent=LLMAnalyst(p), risk_manager=LLMRiskManager(p), episodic_memory_depth=5)
++    df = pd.DataFrame([{"timestamp":f"2026-04-06T00:0{i}:00Z","asset":"BTC","close":c} for i,c in enumerate([100,100.01,100.02,100.03,100.5,101.2,101.3])])
++    log, trades, vol = sim.run(df)
++    assert "Composite score first" in p.calls[2][1] and "agent_warnings" in log.columns
++    db = tmp_path / "run.sqlite"; write_sqlite(db, log, trades, vol)
++    with sqlite3.connect(db) as conn:
++        tables = set(pd.read_sql_query("select name from sqlite_master where type='table'", conn)["name"])
++    assert {"pipeline_log", "trades", "vol_history"}.issubset(tables)
