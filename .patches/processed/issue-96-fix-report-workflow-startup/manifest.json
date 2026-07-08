@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "f6a6891a9899915aaf57af76e36447fc3b276f26",
+  "commit_message": "Fix manual report workflow startup permissions",
+  "implementation_branch": "ai/issue-96-fix-report-workflow-startup",
+  "issue_number": 96,
+  "pr_body": "Closes #96\n\n## Summary\n\nHardens the two manual report workflows after the dashboard validation run failed at startup before any job or artefact was created.\n\n## Changes\n\n- Updates `.github/workflows/generate-issue-dashboard.yml` to use the conservative `permissions: read-all` shorthand.\n- Updates `.github/workflows/check-issue-hygiene.yml` to use the same conservative read-only permission shape.\n- Keeps both workflows manually triggered, report-only, and non-mutating.\n\n## Validation\n\n- `git apply --check /tmp/issue96.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow YAML and command paths reviewed.\n- Runtime workflow validation still needs to be repeated after merge by rerunning #91 and then #93.",
+  "pr_title": "Fix manual report workflow startup failures",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue96.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow YAML and command paths reviewed.",
+    "Runtime workflow validation still needs to be repeated after merge by rerunning #91 and then #93."
+  ]
+}

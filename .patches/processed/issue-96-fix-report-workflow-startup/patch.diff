@@ -1,0 +1,30 @@
+diff --git a/.github/workflows/check-issue-hygiene.yml b/.github/workflows/check-issue-hygiene.yml
+index 0506869..e42e8f3 100644
+--- a/.github/workflows/check-issue-hygiene.yml
++++ b/.github/workflows/check-issue-hygiene.yml
+@@ -25,9 +25,7 @@ on:
+         default: false
+         type: boolean
+ 
+-permissions:
+-  contents: read
+-  issues: read
++permissions: read-all
+ 
+ jobs:
+   check-hygiene:
+diff --git a/.github/workflows/generate-issue-dashboard.yml b/.github/workflows/generate-issue-dashboard.yml
+index 499114f..b556c43 100644
+--- a/.github/workflows/generate-issue-dashboard.yml
++++ b/.github/workflows/generate-issue-dashboard.yml
+@@ -20,9 +20,7 @@ on:
+         default: 200
+         type: number
+ 
+-permissions:
+-  contents: read
+-  issues: read
++permissions: read-all
+ 
+ jobs:
+   generate-dashboard:
