@@ -1,0 +1,18 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "",
+  "commit_message": "Wire LLM-backed replication agents",
+  "implementation_branch": "ai/issue-103-llm-agents",
+  "issue_number": 103,
+  "pr_body": "Closes #103\n\n## Summary\n\nWires LLM-backed Analyst and Risk Manager agents into the replication harness while preserving deterministic fallbacks for offline runs and tests.\n\n## Changes\n\n- Add LLM-backed Analyst and Risk Manager agents using the paper JSON prompts and contracts.\n- Preserve Risk Manager Layer A deterministic hard gates before any LLM call.\n- Add episodic memory briefing from prior per-asset analyst reasoning in the simulator.\n- Add `--agents llm` CLI support and config-driven agent selection.\n- Add mocked unit tests covering LLM contracts, fallback behaviour, hard-gate preservation, and memory injection.\n\n## Validation\n\n- `git apply --check /mnt/data/issue103_tiny.patch`\n- `cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q`\n- `cd replication && python -c \"from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager; print('import ok')\"`\n- `cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/simulator.py replicate.py`\n- `cd replication && python replicate.py --config config.yaml --input-csv /mnt/data/issue103_tiny_cli_input.csv --out /mnt/data/issue103_tiny_cli_out --agents llm`",
+  "pr_title": "Wire LLM-backed replication agents",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /mnt/data/issue103_tiny.patch",
+    "cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q (8 passed)",
+    "cd replication && python -c \"from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager; print('import ok')\"",
+    "cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/simulator.py replicate.py",
+    "cd replication && python replicate.py --config config.yaml --input-csv /mnt/data/issue103_tiny_cli_input.csv --out /mnt/data/issue103_tiny_cli_out --agents llm (passed with deterministic fallbacks because no OPENROUTER_API_KEY was set)"
+  ]
+}
