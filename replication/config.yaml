@@ -20,6 +20,14 @@ cbd:
   alpha: 0.5
   kappa: 0.5
   benchmark_asset: BTC
+llm:
+  provider: openrouter
+  model: qwen/qwen-2.5-7b-instruct
+  api_key_env: OPENROUTER_API_KEY
+  temperature: 0.0
+  max_tokens: 512
+  audit_log_path: results/llm_audit.jsonl
+  timeout_seconds: 60
 cost_scenarios:
   zero_cost: 0.0
   conservative_maker_only: 0.0004
