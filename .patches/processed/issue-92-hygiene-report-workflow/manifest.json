@@ -1,0 +1,16 @@
+{
+  "allow_workflow_changes": true,
+  "base_ref": "main",
+  "base_sha": "77bd480489009d0b3a16c1161519330a307c7716",
+  "commit_message": "Add manual issue hygiene report workflow",
+  "implementation_branch": "ai/issue-92-hygiene-report-workflow",
+  "issue_number": 92,
+  "pr_body": "Closes #92\n\n## Summary\n\nAdds a manual GitHub Actions workflow that runs the report-only issue hygiene checker and uploads Markdown and JSON outputs as workflow artefacts.\n\n## Changes\n\n- Adds `.github/workflows/check-issue-hygiene.yml`.\n- Provides `workflow_dispatch` inputs for issue state, fetch limit, and optional strict mode.\n- Runs `scripts/check_issue_hygiene.py` using the current repository and GitHub Actions token.\n- Uploads `issue_hygiene.md` and `issue_hygiene.json` as an Actions artefact.\n- Writes a job summary with repository, state filter, issue limit, warning count, artefact name, and retention policy.\n\n## Validation\n\n- `git apply --check /tmp/issue92.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow YAML and command paths reviewed.\n- Runtime workflow execution skipped until after merge because the workflow is only available on the default branch after merge.",
+  "pr_title": "Add manual issue hygiene report workflow",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue92.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow YAML and command paths reviewed.",
+    "Runtime workflow execution skipped until after merge because the workflow is only available on the default branch after merge."
+  ]
+}
