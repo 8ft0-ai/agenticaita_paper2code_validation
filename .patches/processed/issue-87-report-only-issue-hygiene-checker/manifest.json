@@ -1,0 +1,18 @@
+{
+  "allow_workflow_changes": false,
+  "base_ref": "main",
+  "base_sha": "1ab0fc8614eb06238896b50b8c80d3862d70a9ba",
+  "commit_message": "Add report-only issue hygiene checker",
+  "implementation_branch": "ai/issue-87-report-only-issue-hygiene-checker",
+  "issue_number": 87,
+  "pr_body": "Closes #87\n\n## Summary\n\nAdds a manually runnable report-only issue hygiene checker for issue-native metadata.\n\n## Changes\n\n- Adds `scripts/check_issue_hygiene.py`.\n- Reports missing `area:*`, `priority:*`, and `status:*` labels.\n- Reports multiple `priority:*` and `status:*` labels.\n- Reports invalid `agent-ready` combinations with blocked or human-decision labels.\n- Supports Markdown and JSON output, stdout or file output, fixture input for deterministic checks, and an optional `--strict` mode.\n\n## Validation\n\n- `git apply --check /tmp/issue87.diff` on the exact unified diff in a clean temporary git worktree.\n- `python -m py_compile /tmp/check_issue_hygiene.py`.\n- `python /tmp/check_issue_hygiene.py --help`.\n- Fixture smoke test with report-only success and `--strict` exit 1 when warnings are present.\n- Live GitHub CLI execution skipped because `gh` is not available in the local validation environment.",
+  "pr_title": "Add report-only issue hygiene checker",
+  "schema_version": "2",
+  "validation": [
+    "git apply --check /tmp/issue87.diff on the exact unified diff in a clean temporary git worktree.",
+    "python -m py_compile /tmp/check_issue_hygiene.py.",
+    "python /tmp/check_issue_hygiene.py --help.",
+    "Fixture smoke test with report-only success and --strict exit 1 when warnings are present.",
+    "Live GitHub CLI execution skipped because gh is not available in the local validation environment."
+  ]
+}
