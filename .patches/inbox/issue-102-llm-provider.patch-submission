@@ -1,0 +1,357 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 102,
+  "base_ref": "main",
+  "base_sha": "",
+  "implementation_branch": "ai/issue-102-llm-provider",
+  "commit_message": "Add OpenRouter LLM provider abstraction",
+  "pr_title": "Add OpenRouter LLM provider abstraction",
+  "pr_body": "Closes #102\n\n## Summary\n\nAdds a pluggable LLM provider boundary for the replication harness and implements an OpenRouter-backed provider using the OpenAI-compatible chat completion API.\n\n## Changes\n\n- Add `src.agenticaita.llm` with `LLMProvider`, `LLMConfig`, `OpenRouterProvider`, JSON parsing helpers, audit logging, and provider factory support.\n- Add an `llm:` section to `replication/config.yaml` with OpenRouter defaults, model, API-key environment variable, deterministic temperature, token budget, timeout, and audit log path.\n- Add mocked unit tests covering importability, request construction, env/config API-key lookup, JSON response parsing, fenced JSON handling, audit logging without secrets, and provider factory creation.\n\n## Validation\n\n- `cd replication && python -m pytest tests/test_llm.py -q`\n- `cd replication && python -c \"from src.agenticaita.llm import OpenRouterProvider; print('import ok')\"`\n- `cd replication && python -m compileall -q src/agenticaita/llm.py`\n- `git apply --check /mnt/data/issue102.patch`",
+  "validation": [
+    "git apply --check /mnt/data/issue102.patch",
+    "cd replication && python -m pytest tests/test_llm.py -q (5 passed)",
+    "cd replication && python -c \"from src.agenticaita.llm import OpenRouterProvider; print('import ok')\"",
+    "cd replication && python -m compileall -q src/agenticaita/llm.py"
+  ],
+  "allow_workflow_changes": false
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/replication/config.yaml b/replication/config.yaml
+index 57140f7..f6384fe 100644
+--- a/replication/config.yaml
++++ b/replication/config.yaml
+@@ -20,6 +20,14 @@ cbd:
+   alpha: 0.5
+   kappa: 0.5
+   benchmark_asset: BTC
++llm:
++  provider: openrouter
++  model: qwen/qwen-2.5-7b-instruct
++  api_key_env: OPENROUTER_API_KEY
++  temperature: 0.0
++  max_tokens: 512
++  audit_log_path: results/llm_audit.jsonl
++  timeout_seconds: 60
+ cost_scenarios:
+   zero_cost: 0.0
+   conservative_maker_only: 0.0004
+diff --git a/replication/src/agenticaita/llm.py b/replication/src/agenticaita/llm.py
+new file mode 100644
+index 0000000..0e06e00
+--- /dev/null
++++ b/replication/src/agenticaita/llm.py
+@@ -0,0 +1,176 @@
++"""Pluggable LLM provider interfaces for the replication harness.
++
++The replication pipeline remains deterministic by default. This module provides
++an explicit provider boundary for later LLM-backed agents while keeping network
++calls isolated, auditable, and easy to mock in tests.
++"""
++from __future__ import annotations
++
++import json
++import os
++import re
++import urllib.error
++import urllib.request
++from abc import ABC, abstractmethod
++from dataclasses import dataclass
++from datetime import datetime, timezone
++from pathlib import Path
++from typing import Any, Mapping
++
++
++class LLMError(RuntimeError):
++    """Raised when an LLM provider cannot produce a valid JSON object."""
++
++
++@dataclass(frozen=True)
++class LLMConfig:
++    """Runtime configuration for a chat-completion LLM provider."""
++
++    provider: str = "openrouter"
++    model: str = "qwen/qwen-2.5-7b-instruct"
++    api_key_env: str = "OPENROUTER_API_KEY"
++    temperature: float = 0.0
++    max_tokens: int = 512
++    base_url: str = "https://openrouter.ai/api/v1/chat/completions"
++    audit_log_path: str | None = None
++    timeout_seconds: float = 60.0
++    api_key: str | None = None
++
++    @classmethod
++    def from_mapping(cls, data: Mapping[str, Any] | None) -> "LLMConfig":
++        """Build configuration from either a root config or its ``llm`` section."""
++
++        raw: Mapping[str, Any] = data or {}
++        if "llm" in raw and isinstance(raw["llm"], Mapping):
++            raw = raw["llm"]
++        return cls(
++            provider=str(raw.get("provider", cls.provider)).lower(),
++            model=str(raw.get("model", cls.model)),
++            api_key_env=str(raw.get("api_key_env", cls.api_key_env)),
++            temperature=float(raw.get("temperature", cls.temperature)),
++            max_tokens=int(raw.get("max_tokens", cls.max_tokens)),
++            base_url=str(raw.get("base_url", cls.base_url)),
++            audit_log_path=str(raw["audit_log_path"]) if raw.get("audit_log_path") else None,
++            timeout_seconds=float(raw.get("timeout_seconds", cls.timeout_seconds)),
++            api_key=str(raw["api_key"]) if raw.get("api_key") else None,
++        )
++
++    def resolved_api_key(self) -> str:
++        """Return the configured API key without exposing it to audit logs."""
++
++        key = self.api_key or os.environ.get(self.api_key_env, "")
++        if not key:
++            raise LLMError(f"Missing API key: set {self.api_key_env} or provide api_key in config")
++        return key
++
++
++class LLMProvider(ABC):
++    """Abstract interface for synchronous JSON-producing LLM providers."""
++
++    @abstractmethod
++    def complete(self, system_prompt: str, user_message: str) -> dict[str, Any]:
++        """Return a parsed JSON object from a provider completion."""
++
++
++class OpenRouterProvider(LLMProvider):
++    """OpenRouter implementation using the OpenAI-compatible chat endpoint."""
++
++    def __init__(self, config: LLMConfig | Mapping[str, Any] | None = None) -> None:
++        self.config = config if isinstance(config, LLMConfig) else LLMConfig.from_mapping(config)
++
++    def complete(self, system_prompt: str, user_message: str) -> dict[str, Any]:
++        api_key = self.config.resolved_api_key()
++        request_payload = {
++            "model": self.config.model,
++            "messages": [
++                {"role": "system", "content": system_prompt},
++                {"role": "user", "content": user_message},
++            ],
++            "temperature": self.config.temperature,
++            "max_tokens": self.config.max_tokens,
++            "response_format": {"type": "json_object"},
++        }
++        request = urllib.request.Request(
++            self.config.base_url,
++            data=json.dumps(request_payload).encode("utf-8"),
++            headers={
++                "Authorization": f"Bearer {api_key}",
++                "Content-Type": "application/json",
++                "Accept": "application/json",
++            },
++            method="POST",
++        )
++
++        try:
++            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310 - URL is explicit provider config.
++                raw_body = response.read().decode("utf-8")
++        except urllib.error.URLError as exc:
++            raise LLMError(f"OpenRouter request failed: {exc}") from exc
++
++        parsed = self._parse_chat_response(raw_body)
++        self._audit(system_prompt, user_message, raw_body, parsed)
++        return parsed
++
++    def _parse_chat_response(self, raw_body: str) -> dict[str, Any]:
++        try:
++            payload = json.loads(raw_body)
++            content = payload["choices"][0]["message"]["content"]
++        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
++            raise LLMError("OpenRouter response did not contain choices[0].message.content") from exc
++
++        return parse_json_object(content)
++
++    def _audit(self, system_prompt: str, user_message: str, raw_response: str, parsed_response: Mapping[str, Any]) -> None:
++        if not self.config.audit_log_path:
++            return
++        path = Path(self.config.audit_log_path)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        record = {
++            "timestamp": datetime.now(timezone.utc).isoformat(),
++            "provider": self.config.provider,
++            "model": self.config.model,
++            "system_prompt": system_prompt,
++            "user_message": user_message,
++            "raw_response": raw_response,
++            "parsed_response": dict(parsed_response),
++        }
++        with path.open("a", encoding="utf-8") as handle:
++            handle.write(json.dumps(record, sort_keys=True) + "\n")
++
++
++_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.IGNORECASE | re.DOTALL)
++
++
++def parse_json_object(content: Any) -> dict[str, Any]:
++    """Parse a provider message content value into a JSON object."""
++
++    if isinstance(content, Mapping):
++        return dict(content)
++    if not isinstance(content, str):
++        raise LLMError("LLM content must be a JSON object or JSON string")
++
++    text = content.strip()
++    fenced = _JSON_FENCE_RE.match(text)
++    if fenced:
++        text = fenced.group(1).strip()
++    try:
++        parsed = json.loads(text)
++    except json.JSONDecodeError as exc:
++        raise LLMError("LLM content was not valid JSON") from exc
++    if not isinstance(parsed, dict):
++        raise LLMError("LLM content must parse to a JSON object")
++    return parsed
++
++
++def build_llm_provider(config: LLMConfig | Mapping[str, Any] | None) -> LLMProvider:
++    """Create an LLM provider from config.
++
++    The factory is intentionally small so future providers can be added without
++    changing agent code. Unsupported providers fail fast rather than silently
++    falling back to a different backend.
++    """
++
++    llm_config = config if isinstance(config, LLMConfig) else LLMConfig.from_mapping(config)
++    if llm_config.provider == "openrouter":
++        return OpenRouterProvider(llm_config)
++    raise LLMError(f"Unsupported LLM provider: {llm_config.provider}")
+diff --git a/replication/tests/test_llm.py b/replication/tests/test_llm.py
+new file mode 100644
+index 0000000..5a08b10
+--- /dev/null
++++ b/replication/tests/test_llm.py
+@@ -0,0 +1,130 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++
++from src.agenticaita.llm import LLMConfig, LLMError, OpenRouterProvider, build_llm_provider, parse_json_object
++
++
++class FakeHTTPResponse:
++    def __init__(self, payload: dict) -> None:
++        self.payload = payload
++
++    def __enter__(self) -> "FakeHTTPResponse":
++        return self
++
++    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
++        return None
++
++    def read(self) -> bytes:
++        return json.dumps(self.payload).encode("utf-8")
++
++
++def test_openrouter_provider_parses_json_response_and_writes_audit_log(monkeypatch, tmp_path: Path) -> None:
++    captured: dict = {}
++    response_payload = {
++        "choices": [
++            {
++                "message": {
++                    "content": json.dumps(
++                        {
++                            "signal": "long",
++                            "confidence": 0.72,
++                            "entry_price": 100.0,
++                            "stop_loss": 99.0,
++                            "take_profit": 103.0,
++                            "size_usd": 188.0,
++                            "reasoning": "Composite score and orderbook context support a long.",
++                        }
++                    )
++                }
++            }
++        ]
++    }
++
++    def fake_urlopen(request, timeout):  # noqa: ANN001
++        captured["url"] = request.full_url
++        captured["headers"] = dict(request.header_items())
++        captured["payload"] = json.loads(request.data.decode("utf-8"))
++        captured["timeout"] = timeout
++        return FakeHTTPResponse(response_payload)
++
++    monkeypatch.setenv("OPENROUTER_API_KEY", "secret-test-key")
++    monkeypatch.setattr("src.agenticaita.llm.urllib.request.urlopen", fake_urlopen)
++    audit_path = tmp_path / "llm_audit.jsonl"
++    provider = OpenRouterProvider(
++        {
++            "model": "qwen/test-model",
++            "temperature": 0.0,
++            "max_tokens": 256,
++            "audit_log_path": str(audit_path),
++            "timeout_seconds": 12,
++        }
++    )
++
++    result = provider.complete("system prompt", "user message")
++
++    assert result["signal"] == "long"
++    assert result["confidence"] == 0.72
++    assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
++    assert captured["headers"]["Authorization"] == "Bearer secret-test-key"
++    assert captured["payload"]["model"] == "qwen/test-model"
++    assert captured["payload"]["messages"][0] == {"role": "system", "content": "system prompt"}
++    assert captured["payload"]["messages"][1] == {"role": "user", "content": "user message"}
++    assert captured["payload"]["max_tokens"] == 256
++    assert captured["timeout"] == 12
++
++    audit_text = audit_path.read_text(encoding="utf-8")
++    assert "system prompt" in audit_text
++    assert "user message" in audit_text
++    assert "secret-test-key" not in audit_text
++
++
++def test_openrouter_provider_reads_api_key_from_config_when_env_missing(monkeypatch) -> None:
++    captured: dict = {}
++
++    def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
++        captured["headers"] = dict(request.header_items())
++        return FakeHTTPResponse({"choices": [{"message": {"content": '{"approved": true, "size_usd": 100, "negotiation_summary": "ok"}'}}]})
++
++    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
++    monkeypatch.setattr("src.agenticaita.llm.urllib.request.urlopen", fake_urlopen)
++
++    provider = OpenRouterProvider(LLMConfig(api_key="config-key"))
++    result = provider.complete("system", "user")
++
++    assert result["approved"] is True
++    assert captured["headers"]["Authorization"] == "Bearer config-key"
++
++
++def test_openrouter_provider_raises_when_api_key_missing(monkeypatch) -> None:
++    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
++    provider = OpenRouterProvider({"api_key_env": "OPENROUTER_API_KEY"})
++
++    with pytest.raises(LLMError, match="Missing API key"):
++        provider.complete("system", "user")
++
++
++def test_parse_json_object_accepts_fenced_json_and_rejects_non_object() -> None:
++    assert parse_json_object('```json\n{"signal": "wait", "confidence": 0.1}\n```') == {"signal": "wait", "confidence": 0.1}
++
++    with pytest.raises(LLMError, match="JSON object"):
++        parse_json_object('["not", "an", "object"]')
++
++
++def test_build_llm_provider_from_root_config() -> None:
++    provider = build_llm_provider(
++        {
++            "llm": {
++                "provider": "openrouter",
++                "model": "qwen/custom",
++                "api_key_env": "CUSTOM_OPENROUTER_KEY",
++            }
++        }
++    )
++
++    assert isinstance(provider, OpenRouterProvider)
++    assert provider.config.model == "qwen/custom"
++    assert provider.config.api_key_env == "CUSTOM_OPENROUTER_KEY"
