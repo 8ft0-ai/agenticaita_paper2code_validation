@@ -13,6 +13,8 @@ from src.agenticaita.data import generate_synthetic_ohlcv, load_ohlcv_csv
 from src.agenticaita.metrics import funding_accounting, summarise, transaction_cost_sensitivity
 from src.agenticaita.risk import RiskConfig
 from src.agenticaita.agents import AnalystConfig
+from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
+from src.agenticaita.llm import build_llm_provider
 from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_sqlite
 
 
@@ -43,6 +45,8 @@ def build_config_metadata(cfg: dict) -> dict:
         "igp": dict(cfg["igp"]),
         "risk": dict(cfg["risk"]),
         "cbd": dict(cfg["cbd"]),
+        "agents": dict(cfg.get("agents", {})),
+        "llm": {k: v for k, v in dict(cfg.get("llm", {})).items() if k != "api_key"},
         "cost_scenarios": dict(cfg["cost_scenarios"]),
         "synthetic_data": dict(cfg.get("synthetic_data", {})),
     }
@@ -86,9 +90,13 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--input-csv", default=None, help="Optional OHLCV CSV with timestamp,asset,close columns")
     parser.add_argument("--out", default=None)
+    parser.add_argument("--agents", choices=["deterministic", "llm"], default=None)
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
+    cfg.setdefault("agents", {"analyst": "deterministic", "risk_manager": "deterministic", "episodic_memory_depth": 5})
+    if args.agents:
+        cfg["agents"].update({"analyst": args.agents, "risk_manager": args.agents})
     out_dir = Path(args.out or cfg["experiment"]["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -123,7 +131,13 @@ def main() -> None:
         max_position_size_usd=float(cfg["risk"]["max_position_size_usd"]),
     )
     analyst_cfg = AnalystConfig(base_position_size_usd=float(cfg["risk"]["base_position_size_usd"]))
-    simulator = PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg)
+    agent_cfg = cfg.get("agents", {})
+    analyst_agent = risk_manager = None
+    if "llm" in {agent_cfg.get("analyst"), agent_cfg.get("risk_manager")}:
+        provider = build_llm_provider(cfg)
+        analyst_agent = LLMAnalyst(provider, analyst_cfg) if agent_cfg.get("analyst") == "llm" else None
+        risk_manager = LLMRiskManager(provider, risk_cfg) if agent_cfg.get("risk_manager") == "llm" else None
+    simulator = PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg, analyst_agent=analyst_agent, risk_manager=risk_manager, episodic_memory_depth=int(agent_cfg.get("episodic_memory_depth", 0)))
     pipeline_log, trades, vol_history = simulator.run(ohlcv)
     summary = summarise(pipeline_log, trades)
 
@@ -159,7 +173,7 @@ def main() -> None:
         "summary": summary.to_dict(),
         "benchmark_modes": funding,
         "transaction_cost_sensitivity": costs,
-        "caveat": "Synthetic data and deterministic proxy agents do not validate the paper's live-market claims.",
+        "caveat": "Synthetic data and proxy or fallback agents do not validate the paper's live-market claims.",
     }
     (out_dir / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     md = [

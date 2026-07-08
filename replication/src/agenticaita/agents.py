@@ -31,7 +31,7 @@ class RuleBasedAnalyst:
     def __init__(self, config: AnalystConfig | None = None) -> None:
         self.config = config or AnalystConfig()
 
-    def decide(self, event: TriggerEvent, cbd: CBDResult) -> AnalystDecision:
+    def decide(self, event: TriggerEvent, cbd: CBDResult, episodic_memory: list[str] | None = None) -> AnalystDecision:
         signal = "long" if event.signed_return > 0 else "short"
         confidence = max(0.0, min(1.0, 0.50 + 0.08 * min(event.z_score, 5.0) + 0.20 * cbd.omega))
         if confidence < self.config.min_confidence_to_trade:

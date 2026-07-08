@@ -5,15 +5,20 @@ import sqlite3
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, Dict
+from typing import Deque, Dict, Protocol
 
 import pandas as pd
 
 from .agents import AnalystConfig, RuleBasedAnalyst
 from .azte import AdaptiveZScoreTriggerEngine, VolSample
 from .cbd import CBDInputs, cbd_score
-from .contracts import ExecutionRecord
+from .contracts import AnalystDecision, ExecutionRecord, RiskDecision
 from .risk import DeterministicRiskManager, RiskConfig
+
+class AnalystAgent(Protocol):
+    def decide(self, event, cbd, episodic_memory: list[str] | None = None) -> AnalystDecision: ...
+class RiskManagerAgent(Protocol):
+    def evaluate(self, decision: AnalystDecision) -> RiskDecision: ...
 
 
 @dataclass(frozen=True)
@@ -41,15 +46,16 @@ class ExitResult:
 class PipelineSimulator:
     """Runs AZTE -> Analyst -> Risk Manager -> Executor over OHLCV closes."""
 
-    def __init__(self, config: SimulatorConfig | None = None, risk: RiskConfig | None = None, analyst: AnalystConfig | None = None) -> None:
+    def __init__(self, config: SimulatorConfig | None = None, risk: RiskConfig | None = None, analyst: AnalystConfig | None = None, analyst_agent: AnalystAgent | None = None, risk_manager: RiskManagerAgent | None = None, episodic_memory_depth: int = 0) -> None:
         self.config = config or SimulatorConfig()
         self.azte = AdaptiveZScoreTriggerEngine(
             window=self.config.rolling_window,
             z_threshold=self.config.z_threshold,
             absolute_return_floor=self.config.absolute_return_floor,
         )
-        self.analyst = RuleBasedAnalyst(analyst)
-        self.risk = DeterministicRiskManager(risk)
+        self.analyst = analyst_agent or RuleBasedAnalyst(analyst)
+        self.risk = risk_manager or DeterministicRiskManager(risk)
+        self.episodic_memory_depth = max(0, int(episodic_memory_depth))
         self.price_windows: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=self.config.rolling_window))
         self.pipeline_log: list[dict] = []
         self.vol_history: list[dict] = []
@@ -112,6 +118,13 @@ class PipelineSimulator:
             return self._ohlcv_exit(decision.asset, timestamp, decision)
         return self._close_only_exit(decision.asset, timestamp, decision.entry_price)
 
+    def _episodic_memory(self, asset: str) -> list[str]:
+        rows = [str(r.get("analyst_reasoning", "")) for r in self.pipeline_log if r.get("asset") == asset and r.get("analyst_reasoning")]
+        return rows[-self.episodic_memory_depth :] if self.episodic_memory_depth else []
+
+    def _agent_warnings(self) -> str:
+        return " | ".join(str(w) for a in (self.analyst, self.risk) if (w := getattr(a, "last_warning", "")))
+
     def _execute(self, timestamp: pd.Timestamp, decision, size_usd: float) -> ExecutionRecord:
         exit_result = self._exit_for_decision(timestamp, decision)
         direction = 1.0 if decision.signal == "long" else -1.0
@@ -165,8 +178,9 @@ class PipelineSimulator:
             benchmark_prices = list(self.price_windows[self.config.benchmark_asset])
             asset_prices = list(self.price_windows[asset])
             cbd = cbd_score(CBDInputs(event.z_score, asset_prices, benchmark_prices, self.config.cbd_alpha, self.config.cbd_kappa))
-            analyst_decision = self.analyst.decide(event, cbd)
+            analyst_decision = self.analyst.decide(event, cbd, self._episodic_memory(asset))
             risk_decision = self.risk.evaluate(analyst_decision)
+            agent_warnings = self._agent_warnings()
             self.pipeline_log.append({
                 "timestamp": str(timestamp),
                 "asset": asset,
@@ -180,6 +194,7 @@ class PipelineSimulator:
                 "risk_rejection_reason": risk_decision.rejection_reason,
                 "analyst_reasoning": analyst_decision.reasoning,
                 "risk_summary": risk_decision.negotiation_summary,
+                "agent_warnings": agent_warnings,
             })
             if risk_decision.approved:
                 self.trades.append(self._execute(timestamp, analyst_decision, risk_decision.size_usd).to_dict())
