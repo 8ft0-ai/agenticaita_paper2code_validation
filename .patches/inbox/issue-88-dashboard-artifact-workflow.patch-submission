@@ -1,0 +1,108 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": "2",
+  "issue_number": 88,
+  "base_ref": "main",
+  "base_sha": "8d843fa29318455fe1e4e03509ad85f22f77fa1a",
+  "implementation_branch": "ai/issue-88-dashboard-artifact-workflow",
+  "commit_message": "Publish issue dashboard as Actions artefact",
+  "pr_title": "Publish issue dashboard as manual Actions artefact",
+  "pr_body": "Closes #88\n\n## Summary\n\nAdds a manual GitHub Actions workflow that generates the issue dashboard and uploads Markdown and JSON dashboard outputs as workflow artefacts.\n\n## Changes\n\n- Adds `.github/workflows/generate-issue-dashboard.yml`.\n- Provides `workflow_dispatch` inputs for issue state and fetch limit.\n- Runs `scripts/generate_issue_dashboard.py` using the current repository and GitHub Actions token.\n- Uploads `issue_dashboard.md` and `issue_dashboard.json` as an Actions artefact.\n- Writes a job summary with repository, state filter, issue limit, artefact name, and retention policy.\n\n## Validation\n\n- `git apply --check /tmp/issue88.diff` on the exact unified diff in a clean temporary git worktree.\n- Workflow YAML and command paths reviewed.\n- Runtime workflow execution skipped until after merge because the workflow is only available on the default branch after merge.",
+  "validation": [
+    "git apply --check /tmp/issue88.diff on the exact unified diff in a clean temporary git worktree.",
+    "Workflow YAML and command paths reviewed.",
+    "Runtime workflow execution skipped until after merge because the workflow is only available on the default branch after merge."
+  ],
+  "allow_workflow_changes": true
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/.github/workflows/generate-issue-dashboard.yml b/.github/workflows/generate-issue-dashboard.yml
+new file mode 100644
+index 0000000..9563ca1
+--- /dev/null
++++ b/.github/workflows/generate-issue-dashboard.yml
+@@ -0,0 +1,83 @@
++name: Generate issue dashboard
++
++on:
++  workflow_dispatch:
++    inputs:
++      state:
++        description: Issue state filter for the generated dashboard.
++        required: true
++        default: open
++        type: choice
++        options:
++          - open
++          - closed
++          - all
++      limit:
++        description: Maximum number of issues to fetch.
++        required: true
++        default: 200
++        type: number
++
++permissions:
++  contents: read
++  issues: read
++
++jobs:
++  generate-dashboard:
++    name: Generate issue dashboard artefact
++    runs-on: ubuntu-latest
++    env:
++      GH_TOKEN: ${{ github.token }}
++      TARGET_REPO: ${{ github.repository }}
++      ISSUE_STATE: ${{ inputs.state }}
++      ISSUE_LIMIT: ${{ inputs.limit }}
++      DASHBOARD_DIR: ${{ runner.temp }}/issue-dashboard
++      ARTIFACT_NAME: issue-dashboard-${{ inputs.state }}
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: "3.x"
++
++      - name: Generate dashboard files
++        shell: bash
++        run: |
++          set -euo pipefail
++          mkdir -p "$DASHBOARD_DIR"
++
++          python scripts/generate_issue_dashboard.py \
++            --repo "$TARGET_REPO" \
++            --state "$ISSUE_STATE" \
++            --limit "$ISSUE_LIMIT" \
++            --markdown-output "$DASHBOARD_DIR/issue_dashboard.md" \
++            --json-output "$DASHBOARD_DIR/issue_dashboard.json"
++
++      - name: Upload dashboard artefact
++        uses: actions/upload-artifact@v4
++        with:
++          name: ${{ env.ARTIFACT_NAME }}
++          path: |
++            ${{ runner.temp }}/issue-dashboard/issue_dashboard.md
++            ${{ runner.temp }}/issue-dashboard/issue_dashboard.json
++          if-no-files-found: error
++          retention-days: 14
++
++      - name: Write job summary
++        if: always()
++        shell: bash
++        run: |
++          {
++            echo "## Issue dashboard artefact"
++            echo
++            echo "- Repository: \`$TARGET_REPO\`"
++            echo "- Issue state filter: \`$ISSUE_STATE\`"
++            echo "- Issue limit: \`$ISSUE_LIMIT\`"
++            echo "- Artefact name: \`$ARTIFACT_NAME\`"
++            echo "- Retention: \`14 days\`"
++            echo
++            echo "Generated files are uploaded as workflow artefacts only."
++            echo "This workflow does not commit \`docs/issue_dashboard.md\`, commit \`docs/issue_dashboard.json\`, mutate issues, or replace \`docs/roadmap.md\`."
++          } >> "$GITHUB_STEP_SUMMARY"
