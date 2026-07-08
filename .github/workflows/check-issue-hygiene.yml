@@ -23,9 +23,7 @@ on:
         default: false
         type: boolean
 
-permissions:
-  contents: read
-  issues: read
+permissions: read-all
 
 jobs:
   check-hygiene:
