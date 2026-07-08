@@ -2,41 +2,11 @@ name: Check issue hygiene
 
 on:
   workflow_dispatch:
-    inputs:
-      state:
-        description: Issue state filter for the hygiene report.
-        required: true
-        default: open
-        type: choice
-        options:
-          - open
-          - closed
-          - all
-      limit:
-        description: Maximum number of issues to fetch.
-        required: true
-        default: 200
-        type: string
-      strict:
-        description: Fail the workflow when metadata warnings are found.
-        required: true
-        default: false
-        type: boolean
-
-permissions: read-all
 
 jobs:
   check-hygiene:
     name: Check issue hygiene report
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      TARGET_REPO: ${{ github.repository }}
-      ISSUE_STATE: ${{ inputs.state }}
-      ISSUE_LIMIT: ${{ inputs.limit }}
-      STRICT_MODE: ${{ inputs.strict }}
-      REPORT_DIR: ${{ runner.temp }}/issue-hygiene
-      ARTIFACT_NAME: issue-hygiene-${{ inputs.state }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -47,47 +17,34 @@ jobs:
           python-version: "3.x"
 
       - name: Generate hygiene reports
-        id: generate
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p "$REPORT_DIR"
+          mkdir -p hygiene-output
 
           python scripts/check_issue_hygiene.py \
-            --repo "$TARGET_REPO" \
-            --state "$ISSUE_STATE" \
-            --limit "$ISSUE_LIMIT" \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --limit 200 \
             --format json \
-            --output "$REPORT_DIR/issue_hygiene.json"
+            --output hygiene-output/issue_hygiene.json
 
           python scripts/check_issue_hygiene.py \
-            --repo "$TARGET_REPO" \
-            --state "$ISSUE_STATE" \
-            --limit "$ISSUE_LIMIT" \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --limit 200 \
             --format markdown \
-            --output "$REPORT_DIR/issue_hygiene.md"
-
-          python - <<'PY'
-          import json
-          import os
-
-          report_path = os.path.join(os.environ["REPORT_DIR"], "issue_hygiene.json")
-          with open(report_path, encoding="utf-8") as handle:
-              summary = json.load(handle).get("summary", {})
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"issues_checked={summary.get('issues_checked', 0)}\n")
-              output.write(f"issues_with_warnings={summary.get('issues_with_warnings', 0)}\n")
-              output.write(f"warning_count={summary.get('warnings', 0)}\n")
-          PY
+            --output hygiene-output/issue_hygiene.md
 
       - name: Upload hygiene artefact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: issue-hygiene-all
           path: |
-            ${{ runner.temp }}/issue-hygiene/issue_hygiene.md
-            ${{ runner.temp }}/issue-hygiene/issue_hygiene.json
+            hygiene-output/issue_hygiene.md
+            hygiene-output/issue_hygiene.json
           if-no-files-found: error
           retention-days: 14
 
@@ -95,15 +52,31 @@ jobs:
         if: always()
         shell: bash
         run: |
+          set -euo pipefail
+
+          issues_checked="not available"
+          issues_with_warnings="not available"
+          warning_count="not available"
+
+          if [ -f hygiene-output/issue_hygiene.json ]; then
+            issues_checked=$(python -c 'import json; print(json.load(open("hygiene-output/issue_hygiene.json", encoding="utf-8")).get("summary", {}).get("issues_checked", 0))')
+            issues_with_warnings=$(python -c 'import json; print(json.load(open("hygiene-output/issue_hygiene.json", encoding="utf-8")).get("summary", {}).get("issues_with_warnings", 0))')
+            warning_count=$(python -c 'import json; print(json.load(open("hygiene-output/issue_hygiene.json", encoding="utf-8")).get("summary", {}).get("warnings", 0))')
+          fi
+
           {
             echo "## Issue hygiene report"
             echo
-            echo "- Repository: \`$TARGET_REPO\`"
-            echo "- Issue state filter: \`$ISSUE_STATE\`"
-            echo "- Issue limit: \`$ISSUE_LIMIT\`"
-            echo "- Issues checked: \`${{ steps.generate.outputs.issues_checked || 'not available' }}\`"
-            echo "- Issues with warnings: \`${{ steps.generate.outputs.issues_with_warnings || 'not available' }}\`"
-            echo "- Warning count: \`${{ steps.generate.outputs.warning_count || 'not available' }}\`"
-            echo "- Artefact name: \`$ARTIFACT_NAME\`"
+            echo "- Repository: \`$GITHUB_REPOSITORY\`"
+            echo "- Issue state filter: \`all\`"
+            echo "- Issue limit: \`200\`"
+            echo "- Issues checked: \`$issues_checked\`"
+            echo "- Issues with warnings: \`$issues_with_warnings\`"
+            echo "- Warning count: \`$warning_count\`"
+            echo "- Artefact name: \`issue-hygiene-all\`"
             echo "- Retention: \`14 days\`"
-            echo "- Strict mode: \`$STRICT_MODE\`"
+            echo "- Strict mode: \`false\`"
+            echo
+            echo "Generated reports are uploaded as workflow artefacts only."
+            echo "This workflow does not mutate issues, labels, milestones, comments, or repository files."
+          } >> "$GITHUB_STEP_SUMMARY"

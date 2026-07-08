@@ -2,35 +2,11 @@ name: Generate issue dashboard
 
 on:
   workflow_dispatch:
-    inputs:
-      state:
-        description: Issue state filter for the generated dashboard.
-        required: true
-        default: open
-        type: choice
-        options:
-          - open
-          - closed
-          - all
-      limit:
-        description: Maximum number of issues to fetch.
-        required: true
-        default: 200
-        type: string
-
-permissions: read-all
 
 jobs:
   generate-dashboard:
     name: Generate issue dashboard artefact
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      TARGET_REPO: ${{ github.repository }}
-      ISSUE_STATE: ${{ inputs.state }}
-      ISSUE_LIMIT: ${{ inputs.limit }}
-      DASHBOARD_DIR: ${{ runner.temp }}/issue-dashboard
-      ARTIFACT_NAME: issue-dashboard-${{ inputs.state }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -42,24 +18,26 @@ jobs:
 
       - name: Generate dashboard files
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p "$DASHBOARD_DIR"
+          mkdir -p dashboard-output
 
           python scripts/generate_issue_dashboard.py \
-            --repo "$TARGET_REPO" \
-            --state "$ISSUE_STATE" \
-            --limit "$ISSUE_LIMIT" \
-            --markdown-output "$DASHBOARD_DIR/issue_dashboard.md" \
-            --json-output "$DASHBOARD_DIR/issue_dashboard.json"
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 200 \
+            --markdown-output dashboard-output/issue_dashboard.md \
+            --json-output dashboard-output/issue_dashboard.json
 
       - name: Upload dashboard artefact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: issue-dashboard-open
           path: |
-            ${{ runner.temp }}/issue-dashboard/issue_dashboard.md
-            ${{ runner.temp }}/issue-dashboard/issue_dashboard.json
+            dashboard-output/issue_dashboard.md
+            dashboard-output/issue_dashboard.json
           if-no-files-found: error
           retention-days: 14
 
@@ -70,10 +48,10 @@ jobs:
           {
             echo "## Issue dashboard artefact"
             echo
-            echo "- Repository: \`$TARGET_REPO\`"
-            echo "- Issue state filter: \`$ISSUE_STATE\`"
-            echo "- Issue limit: \`$ISSUE_LIMIT\`"
-            echo "- Artefact name: \`$ARTIFACT_NAME\`"
+            echo "- Repository: \`$GITHUB_REPOSITORY\`"
+            echo "- Issue state filter: \`open\`"
+            echo "- Issue limit: \`200\`"
+            echo "- Artefact name: \`issue-dashboard-open\`"
             echo "- Retention: \`14 days\`"
             echo
             echo "Generated files are uploaded as workflow artefacts only."
