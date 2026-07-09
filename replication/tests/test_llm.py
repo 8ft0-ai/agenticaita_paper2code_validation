@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,13 @@ class FakeHTTPResponse:
 
     def read(self) -> bytes:
         return json.dumps(self.payload).encode("utf-8")
+
+
+RESPONSE_PAYLOAD = {"choices": [{"message": {"content": '{"approved": true, "size_usd": 100, "negotiation_summary": "ok"}'}}]}
+
+
+def http_error(status: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://openrouter.ai/api/v1/chat/completions", status, f"status {status}", {}, None)
 
 
 def test_openrouter_provider_parses_json_response_and_writes_audit_log(monkeypatch, tmp_path: Path) -> None:
@@ -105,6 +113,40 @@ def test_openrouter_provider_raises_when_api_key_missing(monkeypatch) -> None:
 
     with pytest.raises(LLMError, match="Missing API key"):
         provider.complete("system", "user")
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_openrouter_provider_retries_transient_http_errors(monkeypatch, status: int) -> None:
+    calls = []
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+        calls.append(request)
+        if len(calls) == 1:
+            raise http_error(status)
+        return FakeHTTPResponse(RESPONSE_PAYLOAD)
+
+    monkeypatch.setattr("src.agenticaita.llm.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("src.agenticaita.llm.time.sleep", lambda _seconds: None)
+
+    provider = OpenRouterProvider(LLMConfig(api_key="config-key", max_retries=1, retry_backoff_seconds=0))
+    assert provider.complete("system", "user")["approved"] is True
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_openrouter_provider_does_not_retry_permanent_http_errors(monkeypatch, status: int) -> None:
+    calls = []
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
+        calls.append(request)
+        raise http_error(status)
+
+    monkeypatch.setattr("src.agenticaita.llm.urllib.request.urlopen", fake_urlopen)
+
+    provider = OpenRouterProvider(LLMConfig(api_key="config-key", max_retries=2, retry_backoff_seconds=0))
+    with pytest.raises(LLMError, match=f"permanent HTTP error {status}"):
+        provider.complete("system", "user")
+    assert len(calls) == 1
 
 
 def test_parse_json_object_accepts_fenced_json_and_rejects_non_object() -> None:

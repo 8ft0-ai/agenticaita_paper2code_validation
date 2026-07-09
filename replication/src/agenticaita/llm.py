@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
@@ -35,6 +36,8 @@ class LLMConfig:
     audit_log_path: str | None = None
     timeout_seconds: float = 60.0
     api_key: str | None = None
+    max_retries: int = 2
+    retry_backoff_seconds: float = 0.25
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "LLMConfig":
@@ -53,6 +56,8 @@ class LLMConfig:
             audit_log_path=str(raw["audit_log_path"]) if raw.get("audit_log_path") else None,
             timeout_seconds=float(raw.get("timeout_seconds", cls.timeout_seconds)),
             api_key=str(raw["api_key"]) if raw.get("api_key") else None,
+            max_retries=int(raw.get("max_retries", cls.max_retries)),
+            retry_backoff_seconds=float(raw.get("retry_backoff_seconds", cls.retry_backoff_seconds)),
         )
 
     def resolved_api_key(self) -> str:
@@ -74,6 +79,9 @@ class LLMProvider(ABC):
 
 class OpenRouterProvider(LLMProvider):
     """OpenRouter implementation using the OpenAI-compatible chat endpoint."""
+
+    TRANSIENT_HTTP_STATUS = {429, 500, 502, 503, 504}
+    PERMANENT_HTTP_STATUS = {400, 401, 403, 404}
 
     def __init__(self, config: LLMConfig | Mapping[str, Any] | None = None) -> None:
         self.config = config if isinstance(config, LLMConfig) else LLMConfig.from_mapping(config)
@@ -101,15 +109,31 @@ class OpenRouterProvider(LLMProvider):
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310 - URL is explicit provider config.
-                raw_body = response.read().decode("utf-8")
-        except urllib.error.URLError as exc:
-            raise LLMError(f"OpenRouter request failed: {exc}") from exc
-
+        raw_body = self._urlopen_with_retries(request)
         parsed = self._parse_chat_response(raw_body)
         self._audit(system_prompt, user_message, raw_body, parsed)
         return parsed
+
+    def _urlopen_with_retries(self, request: urllib.request.Request) -> str:
+        attempts = max(0, self.config.max_retries) + 1
+        last_error: urllib.error.URLError | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310 - URL is explicit provider config.
+                    return response.read().decode("utf-8")
+            except urllib.error.HTTPError as exc:
+                if exc.code in self.PERMANENT_HTTP_STATUS:
+                    raise LLMError(f"OpenRouter permanent HTTP error {exc.code}: {exc.reason}") from exc
+                if exc.code not in self.TRANSIENT_HTTP_STATUS:
+                    raise LLMError(f"OpenRouter HTTP error {exc.code}: {exc.reason}") from exc
+                last_error = exc
+            except urllib.error.URLError as exc:
+                last_error = exc
+
+            if attempt < attempts:
+                time.sleep(self.config.retry_backoff_seconds * attempt)
+
+        raise LLMError(f"OpenRouter request failed after {attempts} attempt(s): {last_error}") from last_error
 
     def _parse_chat_response(self, raw_body: str) -> dict[str, Any]:
         try:

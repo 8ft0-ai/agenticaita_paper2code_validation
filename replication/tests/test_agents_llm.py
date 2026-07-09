@@ -2,7 +2,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 import pytest
-from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
+from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager, analyst_json, risk_json
 from src.agenticaita.azte import TriggerEvent
 from src.agenticaita.cbd import CBDResult
 from src.agenticaita.contracts import AnalystDecision
@@ -28,6 +28,32 @@ def test_llm_analyst_contract_memory_and_fallback():
     assert "prior BTC reasoning" in p.calls[0][1]
     assert LLMAnalyst(FakeProvider(error=LLMError("bad json"))).decide(ev(), cb()).signal in {"long", "short", "wait"}
 
+
+def test_analyst_json_reports_field_level_validation_errors():
+    payload = {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":"N/A","take_profit":102,"size_usd":188,"reasoning":"ok"}
+    with pytest.raises(ValueError, match="stop_loss must be numeric"):
+        analyst_json(payload, ev(), cb())
+
+    payload = {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":0,"take_profit":102,"size_usd":188,"reasoning":"ok"}
+    with pytest.raises(ValueError, match="stop_loss must be greater than 0.0"):
+        analyst_json(payload, ev(), cb())
+
+    payload = {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":99,"take_profit":-1,"size_usd":188,"reasoning":"ok"}
+    with pytest.raises(ValueError, match="take_profit must be greater than 0.0"):
+        analyst_json(payload, ev(), cb())
+
+
+def test_risk_json_reports_field_level_validation_errors():
+    with pytest.raises(ValueError, match="approved must be boolean"):
+        risk_json({"approved":"maybe","size_usd":100,"negotiation_summary":"ok"}, RiskConfig())
+
+    with pytest.raises(ValueError, match="size_usd must be at most 500.0"):
+        risk_json({"approved":True,"size_usd":501,"negotiation_summary":"ok"}, RiskConfig(max_position_size_usd=500.0))
+
+    with pytest.raises(ValueError, match="negotiation_summary must be a non-empty string"):
+        risk_json({"approved":True,"size_usd":100,"negotiation_summary":""}, RiskConfig())
+
+
 def test_llm_risk_manager_preserves_hard_gate_and_uses_layer_b():
     p = FakeProvider([{"approved":True,"size_usd":120,"negotiation_summary":"Reduced size for proportional balancing."}])
     m = LLMRiskManager(p, RiskConfig(confidence_gate=0.6))
@@ -35,6 +61,7 @@ def test_llm_risk_manager_preserves_hard_gate_and_uses_layer_b():
     assert p.calls == []
     r = m.evaluate(AnalystDecision("BTC","long",0.9,100,99,102,188,0.6,3,"test"))
     assert r.approved and r.size_usd == 120.0 and len(p.calls) == 1
+
 
 def test_pipeline_memory_and_sqlite(tmp_path: Path):
     pd = pytest.importorskip("pandas")
