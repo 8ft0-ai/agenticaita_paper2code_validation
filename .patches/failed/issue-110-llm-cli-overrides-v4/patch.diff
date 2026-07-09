@@ -1,0 +1,455 @@
+diff --git a/replication/config.yaml b/replication/config.yaml
+index cc6acc2..9045857 100644
+--- a/replication/config.yaml
++++ b/replication/config.yaml
+@@ -28,10 +28,21 @@ llm:
+   max_tokens: 512
+   audit_log_path: results/llm_audit.jsonl
+   timeout_seconds: 60
++  max_retries: 2
++  retry_backoff_seconds: 0.25
+ agents:
+   analyst: deterministic
+   risk_manager: deterministic
+   episodic_memory_depth: 5
++  llm:
++    volatility_regime:
++      high_z_score: 3.0
++      active_z_score: 2.0
++      high_abs_return: 0.01
++      active_abs_return: 0.003
++    prompts:
++      analyst_system_prompt: null
++      risk_system_prompt: null
+ cost_scenarios:
+   zero_cost: 0.0
+   conservative_maker_only: 0.0004
+diff --git a/replication/replicate.py b/replication/replicate.py
+index 6031955..eb698b3 100644
+--- a/replication/replicate.py
++++ b/replication/replicate.py
+@@ -5,6 +5,7 @@ import argparse
+ import json
+ import subprocess
+ from pathlib import Path
++from typing import Any
+ 
+ import pandas as pd
+ import yaml
+@@ -13,15 +14,92 @@ from src.agenticaita.data import generate_synthetic_ohlcv, load_ohlcv_csv
+ from src.agenticaita.metrics import funding_accounting, summarise, transaction_cost_sensitivity
+ from src.agenticaita.risk import RiskConfig
+ from src.agenticaita.agents import AnalystConfig
+-from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
++from src.agenticaita.agents_llm import ANALYST_PROMPT, RISK_PROMPT, LLMAnalyst, LLMRiskManager, VolatilityRegimeConfig
+ from src.agenticaita.llm import build_llm_provider
+ from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_sqlite
+ 
++PROMPT_FILE_CANDIDATES = {
++    "analyst_system_prompt": ("analyst_system_prompt.txt", "analyst_prompt.txt", "analyst.txt"),
++    "risk_system_prompt": ("risk_system_prompt.txt", "risk_prompt.txt", "risk.txt"),
++}
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--config", default="config.yaml")
++    parser.add_argument("--input-csv", default=None, help="Optional OHLCV CSV with timestamp,asset,close columns")
++    parser.add_argument("--out", default=None)
++    parser.add_argument("--agents", choices=["deterministic", "llm"], default=None)
++    parser.add_argument("--provider", default=None, help="Override llm.provider from config.yaml")
++    parser.add_argument("--model", default=None, help="Override llm.model from config.yaml")
++    parser.add_argument("--temperature", type=float, default=None, help="Override llm.temperature from config.yaml")
++    parser.add_argument("--max-tokens", type=int, default=None, help="Override llm.max_tokens from config.yaml")
++    parser.add_argument("--timeout", type=float, default=None, help="Override llm.timeout_seconds from config.yaml")
++    parser.add_argument("--base-url", default=None, help="Override llm.base_url from config.yaml")
++    parser.add_argument("--api-key-env", default=None, help="Override llm.api_key_env from config.yaml")
++    parser.add_argument("--audit-log", default=None, help="Override llm.audit_log_path from config.yaml")
++    parser.add_argument("--max-retries", type=int, default=None, help="Override llm.max_retries from config.yaml")
++    parser.add_argument("--retry-backoff", type=float, default=None, help="Override llm.retry_backoff_seconds from config.yaml")
++    parser.add_argument("--prompt-dir", default=None, help="Directory containing analyst/risk prompt template override files")
++    return parser
++
+ 
+ def load_config(path: Path) -> dict:
+     return yaml.safe_load(path.read_text(encoding="utf-8"))
+ 
++
++def apply_llm_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
++    """Apply optional CLI LLM overrides while preserving config defaults when absent."""
++
++    llm_cfg = cfg.setdefault("llm", {})
++    overrides = {
++        "provider": "provider",
++        "model": "model",
++        "temperature": "temperature",
++        "max_tokens": "max_tokens",
++        "timeout": "timeout_seconds",
++        "base_url": "base_url",
++        "api_key_env": "api_key_env",
++        "audit_log": "audit_log_path",
++        "max_retries": "max_retries",
++        "retry_backoff": "retry_backoff_seconds",
++    }
++    for arg_name, config_key in overrides.items():
++        value = getattr(args, arg_name, None)
++        if value is not None:
++            llm_cfg[config_key] = value
++    return cfg
++
++
++def configured_prompts(cfg: dict, prompt_dir: str | Path | None = None) -> dict[str, str]:
++    """Resolve LLM prompt templates from defaults, config, then optional files."""
++
++    llm_agents = cfg.get("agents", {}).get("llm", {}) if isinstance(cfg.get("agents", {}), dict) else {}
++    prompt_cfg = llm_agents.get("prompts", {}) if isinstance(llm_agents, dict) else {}
++    prompts = {
++        "analyst_system_prompt": str(prompt_cfg.get("analyst_system_prompt") or ANALYST_PROMPT),
++        "risk_system_prompt": str(prompt_cfg.get("risk_system_prompt") or RISK_PROMPT),
++    }
++    if prompt_dir:
++        directory = Path(prompt_dir)
++        for key, names in PROMPT_FILE_CANDIDATES.items():
++            for name in names:
++                candidate = directory / name
++                if candidate.is_file():
++                    prompts[key] = candidate.read_text(encoding="utf-8")
++                    break
++    return prompts
++
++
++def configured_volatility_regime(cfg: dict) -> VolatilityRegimeConfig:
++    llm_agents = cfg.get("agents", {}).get("llm", {}) if isinstance(cfg.get("agents", {}), dict) else {}
++    regime_cfg: dict[str, Any] | None = None
++    if isinstance(llm_agents, dict):
++        raw = llm_agents.get("volatility_regime")
++        regime_cfg = raw if isinstance(raw, dict) else None
++    return VolatilityRegimeConfig.from_mapping(regime_cfg)
++
+ 
+ def get_git_commit_sha(repo_root: Path | None = None) -> str | None:
+     repo_root = repo_root or Path(__file__).resolve().parents[1]
+@@ -88,15 +166,16 @@ def build_data_metadata(ohlcv: pd.DataFrame, data_source: str) -> dict:
+ 
+ 
+ def main() -> None:
+-    parser = argparse.ArgumentParser()
+-    parser.add_argument("--config", default="config.yaml")
+-    parser.add_argument("--input-csv", default=None, help="Optional OHLCV CSV with timestamp,asset,close columns")
+-    parser.add_argument("--out", default=None)
+-    parser.add_argument("--agents", choices=["deterministic", "llm"], default=None)
++    parser = build_parser()
+     args = parser.parse_args()
+ 
+     cfg = load_config(Path(args.config))
++    apply_llm_cli_overrides(cfg, args)
+     cfg.setdefault("agents", {"analyst": "deterministic", "risk_manager": "deterministic", "episodic_memory_depth": 5})
+     if args.agents:
+         cfg["agents"].update({"analyst": args.agents, "risk_manager": args.agents})
+@@ -137,9 +216,19 @@ def main() -> None:
+     analyst_agent = risk_manager = None
+     if "llm" in {agent_cfg.get("analyst"), agent_cfg.get("risk_manager")}:
+         provider = build_llm_provider(cfg)
+-        analyst_agent = LLMAnalyst(provider, analyst_cfg) if agent_cfg.get("analyst") == "llm" else None
+-        risk_manager = LLMRiskManager(provider, risk_cfg) if agent_cfg.get("risk_manager") == "llm" else None
++        prompts = configured_prompts(cfg, args.prompt_dir)
++        regime_cfg = configured_volatility_regime(cfg)
++        analyst_agent = (
++            LLMAnalyst(provider, analyst_cfg, system_prompt=prompts["analyst_system_prompt"], volatility_regime_config=regime_cfg)
++            if agent_cfg.get("analyst") == "llm"
++            else None
++        )
++        risk_manager = (
++            LLMRiskManager(provider, risk_cfg, system_prompt=prompts["risk_system_prompt"])
++            if agent_cfg.get("risk_manager") == "llm"
++            else None
++        )
+     simulator = PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg, analyst_agent=analyst_agent, risk_manager=risk_manager, episodic_memory_depth=int(agent_cfg.get("episodic_memory_depth", 0)))
+     pipeline_log, trades, vol_history = simulator.run(ohlcv)
+     summary = summarise(pipeline_log, trades)
+diff --git a/replication/src/agenticaita/agents_llm.py b/replication/src/agenticaita/agents_llm.py
+index 62185b9..a12845a 100644
+--- a/replication/src/agenticaita/agents_llm.py
++++ b/replication/src/agenticaita/agents_llm.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ import json
+ import logging
+-from dataclasses import asdict
++from dataclasses import asdict, dataclass
+ from typing import Any, Mapping, cast
+ 
+ from .agents import AnalystConfig, RuleBasedAnalyst
+@@ -34,17 +34,54 @@ Respond ONLY in JSON with this schema:
+ """
+ 
++
++@dataclass(frozen=True)
++class VolatilityRegimeConfig:
++    """Thresholds used to describe the trigger context sent to the LLM analyst."""
++
++    high_z_score: float = 3.0
++    active_z_score: float = 2.0
++    high_abs_return: float = 0.01
++    active_abs_return: float = 0.003
++
++    @classmethod
++    def from_mapping(cls, data: Mapping[str, Any] | None) -> "VolatilityRegimeConfig":
++        raw = data or {}
++        return cls(
++            high_z_score=float(raw.get("high_z_score", cls.high_z_score)),
++            active_z_score=float(raw.get("active_z_score", cls.active_z_score)),
++            high_abs_return=float(raw.get("high_abs_return", cls.high_abs_return)),
++            active_abs_return=float(raw.get("active_abs_return", cls.active_abs_return)),
++        )
++
+ 
+ class LLMAnalyst:
+-    def __init__(self, provider: LLMProvider, config: AnalystConfig | None = None) -> None:
++    def __init__(
++        self,
++        provider: LLMProvider,
++        config: AnalystConfig | None = None,
++        *,
++        system_prompt: str | None = None,
++        volatility_regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None,
++    ) -> None:
+         self.provider = provider
+         self.fallback = RuleBasedAnalyst(config)
++        self.system_prompt = system_prompt or ANALYST_PROMPT
++        self.volatility_regime_config = (
++            volatility_regime_config
++            if isinstance(volatility_regime_config, VolatilityRegimeConfig)
++            else VolatilityRegimeConfig.from_mapping(volatility_regime_config)
++        )
+         self.last_warning = ""
+         self.last_prompt = ""
+ 
+     def decide(self, event: TriggerEvent, cbd: CBDResult, episodic_memory: list[str] | None = None) -> AnalystDecision:
+         self.last_warning = ""
+-        self.last_prompt = analyst_message(event, cbd, episodic_memory or [])
++        self.last_prompt = analyst_message(event, cbd, episodic_memory or [], self.volatility_regime_config)
+         try:
+-            return analyst_json(self.provider.complete(ANALYST_PROMPT, self.last_prompt), event, cbd)
++            return analyst_json(self.provider.complete(self.system_prompt, self.last_prompt), event, cbd)
+         except (LLMError, TypeError, ValueError) as exc:
+             self.last_warning = f"LLMAnalyst fallback to deterministic proxy: {exc}"
+@@ -53,12 +90,21 @@ class LLMAnalyst:
+ 
+ 
+ class LLMRiskManager:
+-    def __init__(self, provider: LLMProvider, config: RiskConfig | None = None) -> None:
++    def __init__(
++        self,
++        provider: LLMProvider,
++        config: RiskConfig | None = None,
++        *,
++        system_prompt: str | None = None,
++    ) -> None:
+         self.provider = provider
+         self.config = config or RiskConfig()
++        self.system_prompt = system_prompt or RISK_PROMPT
+         self.last_warning = ""
+         self.last_prompt = ""
+@@ -71,22 +117,30 @@ class LLMRiskManager:
+             sort_keys=True,
+         )
+         try:
+-            return risk_json(self.provider.complete(RISK_PROMPT, self.last_prompt), self.config)
++            return risk_json(self.provider.complete(self.system_prompt, self.last_prompt), self.config)
+         except (LLMError, TypeError, ValueError) as exc:
+             self.last_warning = f"LLMRiskManager fallback to deterministic approval: {exc}"
+             LOG.warning(self.last_warning)
+             return gate
+ 
+ 
+-def volatility_regime(event: TriggerEvent) -> str:
+-    if event.z_score >= 3 or event.abs_return >= 0.01:
++def volatility_regime(event: TriggerEvent, config: VolatilityRegimeConfig | Mapping[str, Any] | None = None) -> str:
++    thresholds = config if isinstance(config, VolatilityRegimeConfig) else VolatilityRegimeConfig.from_mapping(config)
++    if event.z_score >= thresholds.high_z_score or event.abs_return >= thresholds.high_abs_return:
+         return "high"
+-    if event.z_score >= 2 or event.abs_return >= 0.003:
++    if event.z_score >= thresholds.active_z_score or event.abs_return >= thresholds.active_abs_return:
+         return "active"
+     return "low"
+ 
+ 
+-def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str]) -> str:
++def analyst_message(
++    event: TriggerEvent,
++    cbd: CBDResult,
++    memory: list[str],
++    regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None,
++) -> str:
+     return json.dumps(
+         {
+@@ -94,7 +148,7 @@ def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str]) -> s
+             "cbd": asdict(cbd),
+             "composite_score": cbd.omega,
+-            "volatility_regime": volatility_regime(event),
++            "volatility_regime": volatility_regime(event, regime_config),
+             "orderbook_context": "not available; OHLCV trigger context is used as proxy",
+             "episodic_memory_briefing": memory[-5:] or ["No prior reasoning on this asset is available."],
+diff --git a/replication/tests/test_agents_llm.py b/replication/tests/test_agents_llm.py
+index d773331..6af1d16 100644
+--- a/replication/tests/test_agents_llm.py
++++ b/replication/tests/test_agents_llm.py
+@@ -4,7 +4,7 @@ import sqlite3
+ from pathlib import Path
+ import pytest
+-from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager, analyst_json, risk_json
++from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager, VolatilityRegimeConfig, analyst_json, risk_json, volatility_regime
+ from src.agenticaita.azte import TriggerEvent
+ from src.agenticaita.cbd import CBDResult
+@@ -45,6 +45,25 @@ def test_analyst_json_reports_field_level_validation_errors():
+         analyst_json(payload, ev(), cb())
+ 
++
++def test_llm_agents_accept_configurable_prompts_and_volatility_regime():
++    p = FakeProvider([
++        {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":99,"take_profit":102,"size_usd":188,"reasoning":"Composite score 0.60, low volatility regime, orderbook context unavailable."},
++        {"approved":True,"size_usd":120,"negotiation_summary":"Custom risk prompt accepted."},
++    ])
++    regime = VolatilityRegimeConfig(high_z_score=10, active_z_score=9, high_abs_return=0.5, active_abs_return=0.4)
++    analyst = LLMAnalyst(p, system_prompt="custom analyst prompt", volatility_regime_config=regime)
++    decision = analyst.decide(ev(), cb())
++    risk = LLMRiskManager(p, RiskConfig(confidence_gate=0.6), system_prompt="custom risk prompt")
++    risk.evaluate(decision)
++
++    assert p.calls[0][0] == "custom analyst prompt"
++    assert '"volatility_regime": "low"' in p.calls[0][1]
++    assert p.calls[1][0] == "custom risk prompt"
++    assert volatility_regime(ev(), regime) == "low"
++
++
+ def test_risk_json_reports_field_level_validation_errors():
+     with pytest.raises(ValueError, match="approved must be boolean"):
+diff --git a/replication/tests/test_replicate_cli.py b/replication/tests/test_replicate_cli.py
+new file mode 100644
+index 0000000..cf7c9d6
+--- /dev/null
++++ b/replication/tests/test_replicate_cli.py
+@@ -0,0 +1,122 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from replicate import apply_llm_cli_overrides, build_parser, configured_prompts, configured_volatility_regime
++
++
++def test_replicate_help_documents_llm_override_flags() -> None:
++    help_text = build_parser().format_help()
++    for flag in (
++        "--provider",
++        "--model",
++        "--temperature",
++        "--max-tokens",
++        "--timeout",
++        "--base-url",
++        "--api-key-env",
++        "--audit-log",
++        "--max-retries",
++        "--retry-backoff",
++        "--prompt-dir",
++    ):
++        assert flag in help_text
++
++
++def test_apply_llm_cli_overrides_preserves_config_defaults_when_absent() -> None:
++    cfg = {"llm": {"provider": "openrouter", "model": "from-config", "temperature": 0.2}}
++    args = build_parser().parse_args([])
++
++    apply_llm_cli_overrides(cfg, args)
++
++    assert cfg["llm"] == {"provider": "openrouter", "model": "from-config", "temperature": 0.2}
++
++
++def test_apply_llm_cli_overrides_updates_all_llm_parameters() -> None:
++    cfg = {"llm": {}}
++    args = build_parser().parse_args(
++        [
++            "--provider",
++            "openrouter",
++            "--model",
++            "qwen/custom",
++            "--temperature",
++            "0.4",
++            "--max-tokens",
++            "256",
++            "--timeout",
++            "10",
++            "--base-url",
++            "https://example.test/chat",
++            "--api-key-env",
++            "CUSTOM_KEY",
++            "--audit-log",
++            "logs/audit.jsonl",
++            "--max-retries",
++            "3",
++            "--retry-backoff",
++            "0.1",
++        ]
++    )
++
++    apply_llm_cli_overrides(cfg, args)
++
++    assert cfg["llm"] == {
++        "provider": "openrouter",
++        "model": "qwen/custom",
++        "temperature": 0.4,
++        "max_tokens": 256,
++        "timeout_seconds": 10.0,
++        "base_url": "https://example.test/chat",
++        "api_key_env": "CUSTOM_KEY",
++        "audit_log_path": "logs/audit.jsonl",
++        "max_retries": 3,
++        "retry_backoff_seconds": 0.1,
++    }
++
++
++def test_prompt_config_and_prompt_dir_override_defaults(tmp_path: Path) -> None:
++    cfg = {
++        "agents": {
++            "llm": {
++                "prompts": {
++                    "analyst_system_prompt": "configured analyst",
++                    "risk_system_prompt": "configured risk",
++                }
++            }
++        }
++    }
++    assert configured_prompts(cfg) == {
++        "analyst_system_prompt": "configured analyst",
++        "risk_system_prompt": "configured risk",
++    }
++
++    (tmp_path / "analyst_system_prompt.txt").write_text("file analyst", encoding="utf-8")
++    (tmp_path / "risk_system_prompt.txt").write_text("file risk", encoding="utf-8")
++
++    assert configured_prompts(cfg, tmp_path) == {
++        "analyst_system_prompt": "file analyst",
++        "risk_system_prompt": "file risk",
++    }
++
++
++def test_configured_volatility_regime_reads_agent_llm_config() -> None:
++    cfg = {
++        "agents": {
++            "llm": {
++                "volatility_regime": {
++                    "high_z_score": 5,
++                    "active_z_score": 4,
++                    "high_abs_return": 0.02,
++                    "active_abs_return": 0.01,
++                }
++            }
++        }
++    }
++
++    regime = configured_volatility_regime(cfg)
++
++    assert regime.high_z_score == 5
++    assert regime.active_z_score == 4
++    assert regime.high_abs_return == 0.02
++    assert regime.active_abs_return == 0.01
+ 
