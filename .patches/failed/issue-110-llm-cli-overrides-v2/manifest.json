@@ -1,0 +1,16 @@
+{
+  "base_ref": "main",
+  "base_sha": "48ba5d35234b0844508c506816f11b341ca0c1ca",
+  "commit_message": "Add LLM CLI configuration overrides",
+  "implementation_branch": "feature/110-llm-cli-config-overrides-v2",
+  "issue_number": 110,
+  "pr_body": "Closes #110\n\n## Summary\n- Add CLI overrides for LLM provider, model, generation parameters, retry settings, API key env, audit log, base URL, and prompt directory.\n- Move LLM volatility-regime thresholds into config-backed agent settings.\n- Allow analyst and risk prompt templates to be overridden via config or prompt files.\n- Add regression tests for CLI help, default preservation, override mapping, prompt overrides, and configurable volatility regimes.\n\n## Validation\n- `cd replication && python replicate.py --help`\n- `cd replication && python -m compileall -q src/agenticaita/agents_llm.py replicate.py`\n- `cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py tests/test_replicate_cli.py -q`\n- `git apply --check issue110-v2.patch`",
+  "pr_title": "Add CLI overrides for LLM configuration",
+  "schema_version": 2,
+  "validation": [
+    "cd replication && python replicate.py --help",
+    "cd replication && python -m compileall -q src/agenticaita/agents_llm.py replicate.py",
+    "cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py tests/test_replicate_cli.py -q (20 passed)",
+    "git apply --check issue110-v2.patch (passed against a fresh local working tree reconstructed at base 48ba5d35234b0844508c506816f11b341ca0c1ca)"
+  ]
+}
