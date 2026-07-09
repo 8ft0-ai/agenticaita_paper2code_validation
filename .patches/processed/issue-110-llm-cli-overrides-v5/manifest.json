@@ -1,0 +1,15 @@
+{
+  "base_ref": "main",
+  "base_sha": "48ba5d35234b0844508c506816f11b341ca0c1ca",
+  "commit_message": "Add LLM CLI configuration overrides",
+  "implementation_branch": "feature/110-llm-cli-config-overrides-v5",
+  "issue_number": 110,
+  "pr_body": "Closes #110\n\n## Summary\n- Add CLI overrides for LLM provider/model/parameters and prompt directory.\n- Make LLM prompt and volatility-regime settings configurable.\n- Add targeted CLI/config tests.\n\n## Validation\n- `git apply --check issue110-v5.patch`\n- `python /mnt/data/validate_patch_submission_envelope.py .patches/inbox/issue-110-llm-cli-overrides-v5.patch-submission --repo-root . --base-ref HEAD`\n- `python -m py_compile replication/replicate.py replication/src/agenticaita/agents_llm.py replication/tests/test_agents_llm.py replication/tests/test_replicate_cli.py`",
+  "pr_title": "Add CLI overrides for LLM configuration",
+  "schema_version": 2,
+  "validation": [
+    "git apply --check issue110-v5.patch",
+    "python /mnt/data/validate_patch_submission_envelope.py .patches/inbox/issue-110-llm-cli-overrides-v5.patch-submission --repo-root . --base-ref HEAD",
+    "python -m py_compile replication/replicate.py replication/src/agenticaita/agents_llm.py replication/tests/test_agents_llm.py replication/tests/test_replicate_cli.py"
+  ]
+}
