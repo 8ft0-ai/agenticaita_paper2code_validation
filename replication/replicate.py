@@ -5,6 +5,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
@@ -13,10 +14,45 @@ from src.agenticaita.data import generate_synthetic_ohlcv, load_ohlcv_csv
 from src.agenticaita.metrics import funding_accounting, summarise, transaction_cost_sensitivity
 from src.agenticaita.risk import RiskConfig
 from src.agenticaita.agents import AnalystConfig
-from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
+from src.agenticaita.agents_llm import ANALYST_PROMPT, RISK_PROMPT, LLMAnalyst, LLMRiskManager, VolatilityRegimeConfig
 from src.agenticaita.llm import build_llm_provider
 from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig, write_sqlite
 
+LLM_CLI_OVERRIDES = {"provider":"provider","model":"model","temperature":"temperature","max_tokens":"max_tokens","timeout":"timeout_seconds","base_url":"base_url","api_key_env":"api_key_env","audit_log":"audit_log_path","max_retries":"max_retries","retry_backoff":"retry_backoff_seconds"}
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--input-csv", default=None, help="Optional OHLCV CSV with timestamp,asset,close columns")
+    parser.add_argument("--out", default=None)
+    parser.add_argument("--agents", choices=["deterministic", "llm"], default=None)
+    for flag, kwargs in [("--provider",{}),("--model",{}),("--temperature",{"type":float}),("--max-tokens",{"type":int,"dest":"max_tokens"}),("--timeout",{"type":float}),("--base-url",{"dest":"base_url"}),("--api-key-env",{"dest":"api_key_env"}),("--audit-log",{"dest":"audit_log"}),("--max-retries",{"type":int,"dest":"max_retries"}),("--retry-backoff",{"type":float,"dest":"retry_backoff"})]:
+        parser.add_argument(flag, default=None, help="Override LLM config value", **kwargs)
+    parser.add_argument("--prompt-dir", default=None, help="Directory with analyst_system_prompt.txt and/or risk_system_prompt.txt")
+    return parser
+
+def apply_llm_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
+    llm_cfg = cfg.setdefault("llm", {})
+    for arg_name, config_key in LLM_CLI_OVERRIDES.items():
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            llm_cfg[config_key] = value
+    return cfg
+
+def configured_prompts(cfg: dict, prompt_dir: str | Path | None = None) -> dict[str, str]:
+    prompts = (cfg.get("agents", {}).get("llm", {}).get("prompts", {}) if isinstance(cfg.get("agents", {}), dict) else {})
+    resolved = {"analyst_system_prompt": prompts.get("analyst_system_prompt") or ANALYST_PROMPT, "risk_system_prompt": prompts.get("risk_system_prompt") or RISK_PROMPT}
+    if prompt_dir:
+        for key in resolved:
+            path = Path(prompt_dir) / f"{key}.txt"
+            if path.is_file():
+                resolved[key] = path.read_text(encoding="utf-8")
+    return {k: str(v) for k, v in resolved.items()}
+
+def configured_volatility_regime(cfg: dict) -> VolatilityRegimeConfig:
+    agents = cfg.get("agents", {})
+    raw = agents.get("llm", {}).get("volatility_regime") if isinstance(agents, dict) else None
+    return VolatilityRegimeConfig.from_mapping(raw if isinstance(raw, dict) else None)
 
 def load_config(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -86,14 +122,11 @@ def build_data_metadata(ohlcv: pd.DataFrame, data_source: str) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--input-csv", default=None, help="Optional OHLCV CSV with timestamp,asset,close columns")
-    parser.add_argument("--out", default=None)
-    parser.add_argument("--agents", choices=["deterministic", "llm"], default=None)
+    parser = build_parser()
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
+    apply_llm_cli_overrides(cfg, args)
     cfg.setdefault("agents", {"analyst": "deterministic", "risk_manager": "deterministic", "episodic_memory_depth": 5})
     if args.agents:
         cfg["agents"].update({"analyst": args.agents, "risk_manager": args.agents})
@@ -135,8 +168,10 @@ def main() -> None:
     analyst_agent = risk_manager = None
     if "llm" in {agent_cfg.get("analyst"), agent_cfg.get("risk_manager")}:
         provider = build_llm_provider(cfg)
-        analyst_agent = LLMAnalyst(provider, analyst_cfg) if agent_cfg.get("analyst") == "llm" else None
-        risk_manager = LLMRiskManager(provider, risk_cfg) if agent_cfg.get("risk_manager") == "llm" else None
+        prompts = configured_prompts(cfg, args.prompt_dir)
+        regime_cfg = configured_volatility_regime(cfg)
+        analyst_agent = LLMAnalyst(provider, analyst_cfg, system_prompt=prompts["analyst_system_prompt"], volatility_regime_config=regime_cfg) if agent_cfg.get("analyst") == "llm" else None
+        risk_manager = LLMRiskManager(provider, risk_cfg, system_prompt=prompts["risk_system_prompt"]) if agent_cfg.get("risk_manager") == "llm" else None
     simulator = PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg, analyst_agent=analyst_agent, risk_manager=risk_manager, episodic_memory_depth=int(agent_cfg.get("episodic_memory_depth", 0)))
     pipeline_log, trades, vol_history = simulator.run(ohlcv)
     summary = summarise(pipeline_log, trades)

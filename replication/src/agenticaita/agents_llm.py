@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping, cast
 
 from .agents import AnalystConfig, RuleBasedAnalyst
@@ -32,18 +32,33 @@ Respond ONLY in JSON with this schema:
 """
 
 
+@dataclass(frozen=True)
+class VolatilityRegimeConfig:
+    high_z_score: float = 3.0
+    active_z_score: float = 2.0
+    high_abs_return: float = 0.01
+    active_abs_return: float = 0.003
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> "VolatilityRegimeConfig":
+        raw = data or {}
+        return cls(float(raw.get("high_z_score", cls.high_z_score)), float(raw.get("active_z_score", cls.active_z_score)), float(raw.get("high_abs_return", cls.high_abs_return)), float(raw.get("active_abs_return", cls.active_abs_return)))
+
+
 class LLMAnalyst:
-    def __init__(self, provider: LLMProvider, config: AnalystConfig | None = None) -> None:
+    def __init__(self, provider: LLMProvider, config: AnalystConfig | None = None, *, system_prompt: str | None = None, volatility_regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None) -> None:
         self.provider = provider
         self.fallback = RuleBasedAnalyst(config)
+        self.system_prompt = system_prompt or ANALYST_PROMPT
+        self.volatility_regime_config = volatility_regime_config if isinstance(volatility_regime_config, VolatilityRegimeConfig) else VolatilityRegimeConfig.from_mapping(volatility_regime_config)
         self.last_warning = ""
         self.last_prompt = ""
 
     def decide(self, event: TriggerEvent, cbd: CBDResult, episodic_memory: list[str] | None = None) -> AnalystDecision:
         self.last_warning = ""
-        self.last_prompt = analyst_message(event, cbd, episodic_memory or [])
+        self.last_prompt = analyst_message(event, cbd, episodic_memory or [], self.volatility_regime_config)
         try:
-            return analyst_json(self.provider.complete(ANALYST_PROMPT, self.last_prompt), event, cbd)
+            return analyst_json(self.provider.complete(self.system_prompt, self.last_prompt), event, cbd)
         except (LLMError, TypeError, ValueError) as exc:
             self.last_warning = f"LLMAnalyst fallback to deterministic proxy: {exc}"
             LOG.warning(self.last_warning)
@@ -51,9 +66,10 @@ class LLMAnalyst:
 
 
 class LLMRiskManager:
-    def __init__(self, provider: LLMProvider, config: RiskConfig | None = None) -> None:
+    def __init__(self, provider: LLMProvider, config: RiskConfig | None = None, *, system_prompt: str | None = None) -> None:
         self.provider = provider
         self.config = config or RiskConfig()
+        self.system_prompt = system_prompt or RISK_PROMPT
         self.last_warning = ""
         self.last_prompt = ""
         self.layer_a = DeterministicRiskManager(self.config)
@@ -69,28 +85,29 @@ class LLMRiskManager:
             sort_keys=True,
         )
         try:
-            return risk_json(self.provider.complete(RISK_PROMPT, self.last_prompt), self.config)
+            return risk_json(self.provider.complete(self.system_prompt, self.last_prompt), self.config)
         except (LLMError, TypeError, ValueError) as exc:
             self.last_warning = f"LLMRiskManager fallback to deterministic approval: {exc}"
             LOG.warning(self.last_warning)
             return gate
 
 
-def volatility_regime(event: TriggerEvent) -> str:
-    if event.z_score >= 3 or event.abs_return >= 0.01:
+def volatility_regime(event: TriggerEvent, config: VolatilityRegimeConfig | Mapping[str, Any] | None = None) -> str:
+    thresholds = config if isinstance(config, VolatilityRegimeConfig) else VolatilityRegimeConfig.from_mapping(config)
+    if event.z_score >= thresholds.high_z_score or event.abs_return >= thresholds.high_abs_return:
         return "high"
-    if event.z_score >= 2 or event.abs_return >= 0.003:
+    if event.z_score >= thresholds.active_z_score or event.abs_return >= thresholds.active_abs_return:
         return "active"
     return "low"
 
 
-def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str]) -> str:
+def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str], regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None) -> str:
     return json.dumps(
         {
             "trigger": asdict(event),
             "cbd": asdict(cbd),
             "composite_score": cbd.omega,
-            "volatility_regime": volatility_regime(event),
+            "volatility_regime": volatility_regime(event, regime_config),
             "orderbook_context": "not available; OHLCV trigger context is used as proxy",
             "episodic_memory_briefing": memory[-5:] or ["No prior reasoning on this asset is available."],
         },
