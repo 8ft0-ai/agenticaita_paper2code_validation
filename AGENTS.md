@@ -1,91 +1,117 @@
 # AGENTS.md
 
-## Project workflow
+## Patch-submission workflow (primary path)
 
-This repository uses the single-file `.patch-submission` envelope broker for implementation work.
-
-Agents must not push materialised implementation or source changes directly to `main`.
-
-Normal implementation work should be submitted as one envelope file under `.patches/inbox/` on the existing `patch-submissions` branch:
+This repository uses the single-file `.patch-submission` envelope broker. Do not push source changes directly to `main`. Normal implementation work is submitted as one envelope file on the `patch-submissions` branch:
 
 ```text
 .patches/inbox/<submission-id>.patch-submission
 ```
 
-The broker validates the extracted patch, creates the implementation branch, opens the pull request, and archives the submission.
+The broker validates the patch, creates the implementation branch, opens the PR, and archives the submission.
 
-## Hard rules
+Hard rules:
+- Do not create branches or PRs manually unless explicitly instructed.
+- The only remote write is one commit to `patch-submissions` with exactly one `.patch-submission` file.
+- Keep changes scoped to one GitHub issue. Do not submit while another submission is unresolved.
+- Never resubmit a failed envelope unchanged; regenerate from `origin/main` and use a fresh `-v2` id.
 
-- Do not create implementation branches or pull requests manually unless explicitly instructed.
-- Do not push source-code, documentation, generated data, or result artefact changes directly to `main`.
-- For normal implementation work, the only remote write is one commit to `patch-submissions` containing exactly one `.patch-submission` envelope file.
-- Keep changes scoped to one GitHub issue.
-- Do not submit another envelope while a previous submission is unresolved.
-- Never resubmit a failed envelope unchanged; regenerate from current `origin/main` and use a fresh `-v2` or split submission id.
+Use `.agents/skills/submitting-patches-through-envelope/SKILL.md` for the full procedure.
+Use `.agents/repo-profile.md` for repo-specific validation commands and generated-artefact exclusions.
 
-## Validation expectations
+## Architecture: three independent modules, no package
 
-Select validation based on the changed area.
+This repo is not an installable package. There is no `setup.py`, `pyproject.toml`, or shared package boundary.
 
-Dependency installation:
+- `validation/` — static claim audit and optional real-data validation
+- `replication/` — functional architecture replication with a proper `src/agenticaita/` sub-package
+- `scripts/` — standalone CLI tools (fetch, metrics, export, comparison, run orchestration, GitHub hygiene)
+
+**`scripts/` is NOT a Python package** (no `__init__.py`). Scripts there can only be imported when their directory is on `sys.path`. Several modules work around this with `sys.path.insert()`:
+- `validation/real_data_validation.py` injects `scripts/` to import `compute_azte_cbd_metrics` and `fetch_hyperliquid_ohlcv`
+- Root-level `tests/` imports from `scripts.<module>` relying on directory adjacency
+
+## Three separate requirements files
+
+Install dependencies based on what you're touching:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt          # root: ccxt, pandas, PyYAML, scipy, tabulate
+cd validation && pip install -r requirements.txt  # validation: scipy, pytest, PyYAML
+cd replication && pip install -r requirements.txt # replication: numpy, pandas, PyYAML, pytest, tabulate
+```
+
+For most work, the root `requirements.txt` suffices. Add pytest to the root install when running tests.
+
+## No lint or typecheck config
+
+There is no `ruff.toml`, `pyproject.toml`, `setup.cfg`, `flake8`, or `mypy` configuration. The `.gitignore` references `.ruff_cache/` but there is no committed ruff config. CI does not run any linter or typechecker.
+
+## Testing: three disjoint pytest suites
+
+There is no unified pytest config, `pytest.ini`, or root conftest. Each suite runs independently:
+
+```bash
+pytest tests/ -q                        # root scripts tests (no conftest)
+cd validation && pytest -q              # validation tests
+cd replication && pytest -q             # replication tests
+```
+
+The CI workflow `results-surface.yml` does not run `pytest`. It runs validation and replication as smoke-tests:
+```bash
+cd validation && python validate_claims.py --out results
+python replication/replicate.py --config replication/config.yaml --out replication/results_ci_synthetic
+```
+
+## Key CLI shortcuts
+
+Static claim validation (no market data needed):
+```bash
+cd validation && python validate_claims.py --out results
+```
+
+Real-data validation (requires market DB):
+```bash
+cd validation && python validate_claims.py --market-db ../data/hyperliquid_ohlcv/market_data.sqlite --out results
 ```
 
 Market-data smoke test:
-
 ```bash
 python scripts/fetch_hyperliquid_ohlcv.py --symbol-limit 3
 ```
 
-AZTE/CBD metrics when relevant:
-
+AZTE/CBD metrics:
 ```bash
 python scripts/compute_azte_cbd_metrics.py --symbols BTC/USDC:USDC,ETH/USDC:USDC
 ```
 
-Static claim validation:
-
+Replication dry-run (synthetic data, no input CSV):
 ```bash
-cd validation
-python validate_claims.py --out results
+python replication/replicate.py --config replication/config.yaml --out replication/results_ci_synthetic
 ```
 
-Real-data validation when market data is available:
-
+Replication with real data (requires exported CSV):
 ```bash
-cd validation
-python validate_claims.py --market-db ../data/hyperliquid_ohlcv/market_data.sqlite --out results
+python replication/replicate.py --config replication/config.yaml --input-csv <path> --out <dir>
 ```
 
-Report skipped validations explicitly.
+Full automated real-data pipeline:
+```bash
+python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm --timeframe 1m --start 2026-04-06T00:00:00Z --end 2026-04-11T23:59:59Z --config replication/config.yaml
+```
 
-## Generated data and artefacts
+## Two separate config files
 
-Do not commit generated market data, SQLite databases, coverage reports, replication outputs, validation results, local caches, bytecode, or large artefacts unless the issue explicitly asks for small fixtures.
+`validation/config.yaml` and `replication/config.yaml` have different schemas. They are not shared.
 
-Avoid committing:
+## CI expectations
 
-- `data/`
-- `replication/results*/`
-- `validation/results/`
-- `*.sqlite`
-- `*.db`
-- `coverage_report.*`
-- `real_data_validation_results.*`
-- `real_data_validation_report.md`
-- `__pycache__/`
-- `.pytest_cache/`
-- `.coverage`
-- `*.pyc`
-- `.DS_Store`
-- `.patches/`
+- `results-surface.yml` runs on PRs touching `docs/`, `replication/`, `scripts/`, `tests/`, or `validation/` — it runs both static validation and synthetic replication as smoke checks and fails on non-zero exit.
+- `patch-submission-envelope-broker.yml` triggers on push to `patch-submissions` branch matching `.patches/inbox/*.patch-submission`.
+- `paper-window-real-data.yml` is workflow_dispatch only (manual real-data replication).
+- No workflow runs pytest or lint.
 
-## Skills and prompts
+## Issue and PR conventions
 
-Use `.agents/repo-profile.md` for repository-specific constraints.
-
-Use `.agents/skills/submitting-patches-through-envelope/SKILL.md` when submitting existing patches through the broker.
-
-Use `.agents/prompts/single-file-patch-submission.md` for ChatGPT web sessions.
+- Use `Closes #N` for PRs that should close the issue after merge. Use `Addresses #N` for smoke tests, diagnostics, or PRs that may be closed unmerged.
+- For historical-data reconstruction work, explicitly note that public APIs cannot recover original L2 snapshots, LLM decisions, or the paper's SQLite logs.
