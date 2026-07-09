@@ -1,0 +1,15 @@
+{
+  "base_ref": "main",
+  "base_sha": "f98acc4397d7ca172941cd33b80cdf5709151417",
+  "commit_message": "Add LLM CLI config overrides (#110)",
+  "implementation_branch": "feature/110-llm-cli-config-overrides",
+  "issue_number": 110,
+  "pr_body": "## Summary\n\nCloses #110.\n\nAdds command-line overrides for LLM provider/model/runtime parameters, moves the analyst volatility-regime thresholds behind config, and supports prompt template overrides through config or a prompt directory.\n\n## Changes\n\n- Adds `replicate.py` LLM override flags for provider, model, temperature, max tokens, timeout, base URL, API key env, audit log, max retries, retry backoff, and prompt directory.\n- Adds `agents.llm.volatility_regime` defaults to `config.yaml`.\n- Allows `LLMAnalyst` and `LLMRiskManager` to receive configured prompts.\n- Allows `LLMAnalyst` to receive configured volatility-regime thresholds.\n- Adds tests for CLI help/override plumbing and config-driven volatility-regime classification.\n\n## Validation\n\n- [x] `cd replication && python replicate.py --help`\n- [x] `cd replication && python -m pytest tests/test_agents_llm.py tests/test_replication.py -q`\n- [x] `cd replication && python -m compileall -q replicate.py src/agenticaita/agents_llm.py`\n\n## Scope\n\nNo sweep support and no live OpenRouter smoke path are included; those remain #108 and #109.\n\n## Auto-merge\n\nAuto-merge is not enabled by the submitting agent because repository auto-merge is disabled.\n",
+  "pr_title": "Add LLM CLI config overrides",
+  "schema_version": 2,
+  "validation": [
+    "cd replication && python replicate.py --help",
+    "cd replication && python -m pytest tests/test_agents_llm.py tests/test_replication.py -q",
+    "cd replication && python -m compileall -q replicate.py src/agenticaita/agents_llm.py"
+  ]
+}
