@@ -11,8 +11,11 @@ from typing import Iterable, Iterator
 import pandas as pd
 import yaml
 
+from replicate import apply_llm_cli_overrides, configured_prompts, configured_volatility_regime
 from src.agenticaita.agents import AnalystConfig
+from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
 from src.agenticaita.data import load_ohlcv_csv
+from src.agenticaita.llm import build_llm_provider
 from src.agenticaita.metrics import summarise
 from src.agenticaita.risk import RiskConfig
 from src.agenticaita.simulator import PipelineSimulator, SimulatorConfig
@@ -33,6 +36,19 @@ DEFAULT_GRID = {
     "risk.confidence_gate": [0.60, 0.65],
     "azte.absolute_return_floor": [0.003],
 }
+
+LLM_CLI_FLAGS = [
+    ("--provider", {}),
+    ("--model", {}),
+    ("--temperature", {"type": float}),
+    ("--max-tokens", {"type": int, "dest": "max_tokens"}),
+    ("--timeout", {"type": float}),
+    ("--base-url", {"dest": "base_url"}),
+    ("--api-key-env", {"dest": "api_key_env"}),
+    ("--audit-log", {"dest": "audit_log"}),
+    ("--max-retries", {"type": int, "dest": "max_retries"}),
+    ("--retry-backoff", {"type": float, "dest": "retry_backoff"}),
+]
 
 
 def load_config(path: str | Path) -> dict:
@@ -66,7 +82,7 @@ def config_for_params(base_cfg: dict, params: dict[str, object]) -> dict:
     return cfg
 
 
-def build_simulator(cfg: dict) -> PipelineSimulator:
+def build_simulator(cfg: dict, agents: str | None = None, prompt_dir: str | Path | None = None) -> PipelineSimulator:
     sim_cfg = SimulatorConfig(
         rolling_window=int(cfg["azte"]["rolling_window"]),
         z_threshold=float(cfg["azte"]["z_threshold"]),
@@ -84,7 +100,34 @@ def build_simulator(cfg: dict) -> PipelineSimulator:
         max_position_size_usd=float(cfg["risk"]["max_position_size_usd"]),
     )
     analyst_cfg = AnalystConfig(base_position_size_usd=float(cfg["risk"]["base_position_size_usd"]))
-    return PipelineSimulator(sim_cfg, risk_cfg, analyst_cfg)
+    agent_cfg = copy.deepcopy(cfg.get("agents", {}))
+    if agents is not None:
+        agent_cfg.update({"analyst": agents, "risk_manager": agents})
+
+    analyst_agent = risk_manager = None
+    if "llm" in {agent_cfg.get("analyst"), agent_cfg.get("risk_manager")}:
+        provider = build_llm_provider(cfg)
+        prompts = configured_prompts(cfg, prompt_dir)
+        regime_cfg = configured_volatility_regime(cfg)
+        analyst_agent = (
+            LLMAnalyst(provider, analyst_cfg, system_prompt=prompts["analyst_system_prompt"], volatility_regime_config=regime_cfg)
+            if agent_cfg.get("analyst") == "llm"
+            else None
+        )
+        risk_manager = (
+            LLMRiskManager(provider, risk_cfg, system_prompt=prompts["risk_system_prompt"])
+            if agent_cfg.get("risk_manager") == "llm"
+            else None
+        )
+
+    return PipelineSimulator(
+        sim_cfg,
+        risk_cfg,
+        analyst_cfg,
+        analyst_agent=analyst_agent,
+        risk_manager=risk_manager,
+        episodic_memory_depth=int(agent_cfg.get("episodic_memory_depth", 0)),
+    )
 
 
 def metric_error(actual: float | None, target: float) -> float:
@@ -103,25 +146,25 @@ def flatten_params(params: dict[str, object]) -> dict[str, object]:
     return {key.replace(".", "_"): value for key, value in params.items()}
 
 
-def run_one(ohlcv: pd.DataFrame, base_cfg: dict, params: dict[str, object]) -> dict:
+def run_one(ohlcv: pd.DataFrame, base_cfg: dict, params: dict[str, object], agents: str = "deterministic", prompt_dir: str | Path | None = None) -> dict:
     cfg = config_for_params(base_cfg, params)
-    pipeline_log, trades, _ = build_simulator(cfg).run(ohlcv)
+    pipeline_log, trades, _ = build_simulator(cfg, agents=agents, prompt_dir=prompt_dir).run(ohlcv)
     summary = summarise(pipeline_log, trades).to_dict()
     score, errors = alignment_score(summary)
     return {"alignment_score": score, **flatten_params(params), **summary, **errors}
 
 
-def run_sweep(ohlcv: pd.DataFrame, base_cfg: dict, grid: dict[str, list], max_runs: int | None = None) -> pd.DataFrame:
+def run_sweep(ohlcv: pd.DataFrame, base_cfg: dict, grid: dict[str, list], max_runs: int | None = None, agents: str = "deterministic", prompt_dir: str | Path | None = None) -> pd.DataFrame:
     rows = []
     params_iter: Iterable[dict[str, object]] = iter_grid(grid)
     if max_runs is not None:
         params_iter = itertools.islice(params_iter, max_runs)
     for params in params_iter:
-        rows.append(run_one(ohlcv, base_cfg, params))
+        rows.append(run_one(ohlcv, base_cfg, params, agents=agents, prompt_dir=prompt_dir))
     return pd.DataFrame(rows).sort_values("alignment_score").reset_index(drop=True)
 
 
-def write_outputs(results: pd.DataFrame, out_dir: Path, top_n: int, input_csv: str, grid: dict[str, list]) -> None:
+def write_outputs(results: pd.DataFrame, out_dir: Path, top_n: int, input_csv: str, grid: dict[str, list], agents: str = "deterministic") -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     results.to_csv(out_dir / "calibration_sweep_results.csv", index=False)
     top = results.head(top_n).copy()
@@ -130,6 +173,7 @@ def write_outputs(results: pd.DataFrame, out_dir: Path, top_n: int, input_csv: s
         "# Calibration Sweep Results",
         "",
         f"Input CSV: `{input_csv}`",
+        f"Agent mode: `{agents}`",
         f"Run count: `{len(results)}`",
         "",
         "## Paper Targets",
@@ -158,16 +202,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--grid-json", default=None, help="optional JSON object mapping dotted config keys to value lists")
     parser.add_argument("--top-n", type=int, default=10)
     parser.add_argument("--max-runs", type=int, default=None, help="optional cap for smoke-testing a subset of the grid")
+    parser.add_argument("--agents", choices=["deterministic", "llm"], default="deterministic")
+    for flag, kwargs in LLM_CLI_FLAGS:
+        parser.add_argument(flag, default=None, help="Override LLM config value", **kwargs)
+    parser.add_argument("--prompt-dir", default=None, help="Directory with analyst_system_prompt.txt and/or risk_system_prompt.txt")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
     cfg = load_config(args.config)
+    apply_llm_cli_overrides(cfg, args)
     grid = load_grid(args.grid_json)
     ohlcv = load_ohlcv_csv(args.input_csv)
-    results = run_sweep(ohlcv, cfg, grid, max_runs=args.max_runs)
-    write_outputs(results, Path(args.out), args.top_n, args.input_csv, grid)
+    results = run_sweep(ohlcv, cfg, grid, max_runs=args.max_runs, agents=args.agents, prompt_dir=args.prompt_dir)
+    write_outputs(results, Path(args.out), args.top_n, args.input_csv, grid, agents=args.agents)
     print(f"wrote {len(results)} ranked sweep runs to {args.out}")
 
 
