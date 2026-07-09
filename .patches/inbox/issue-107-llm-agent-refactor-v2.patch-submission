@@ -1,0 +1,446 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": 2,
+  "issue_number": 107,
+  "base_ref": "main",
+  "base_sha": "592c6df0b745afde5e099ded947e48672730cba1",
+  "implementation_branch": "feature/107-llm-agent-refactor-retry-validation-v2",
+  "commit_message": "Refactor LLM agents and provider retry handling (#107)",
+  "pr_title": "Refactor LLM agents and provider retry handling",
+  "pr_body": "## Summary\n\nCloses #107.\n\nRefactors the LLM-backed analyst/risk agents and OpenRouter provider error handling so the LLM path is more readable, produces field-attributed validation failures, and retries transient provider failures without retrying permanent auth/permission errors.\n\n## Changes\n\n- Breaks long prompt constants into multi-line template strings.\n- Replaces compact one-line LLM agent methods with explicit control flow.\n- Adds helper validators for required fields, booleans, signals, non-empty text, and numeric bounds.\n- Adds positive validation for analyst `entry_price`, `stop_loss`, and `take_profit`.\n- Adds configurable OpenRouter retry count/backoff defaults to `LLMConfig`.\n- Retries transient OpenRouter HTTP errors including 429 and 503, and fails immediately for permanent 401/403 errors.\n- Adds unit tests for field-attributed validation errors and provider retry/permanent-failure behaviour.\n\n## Validation\n\n- [x] `cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q` — 14 passed\n- [x] `cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/llm.py`\n- [x] `grep -n \"type: ignore\" replication/src/agenticaita/agents_llm.py || true` — no matches\n- [x] `git apply --check issue107-v2.patch` against base `592c6df0b745afde5e099ded947e48672730cba1` using a proper git-format patch\n\n## Scope and caveats\n\n- Scoped to #107 only.\n- CLI override wiring, prompt-directory support, sweep support, and live OpenRouter smoke execution remain for follow-up issues.\n- A first envelope failed at the broker apply step because the diff lacked `diff --git` headers; this v2 submission uses a proper git-format patch and a fresh submission id/branch.\n- No generated market data, SQLite DB, validation result directory, replication output, cache, or broker archive is included.\n\n## Auto-merge\n\nAuto-merge was not enabled by the submitting agent because the repository reports auto-merge as disabled.\n",
+  "validation": [
+    "cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q (14 passed)",
+    "cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/llm.py (passed)",
+    "grep -n \"type: ignore\" replication/src/agenticaita/agents_llm.py || true (no matches)",
+    "git apply --check issue107-v2.patch against base 592c6df0b745afde5e099ded947e48672730cba1 (passed with proper git-format diff headers)"
+  ]
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/replication/src/agenticaita/agents_llm.py b/replication/src/agenticaita/agents_llm.py
+index f9a2040..62185b9 100644
+--- a/replication/src/agenticaita/agents_llm.py
++++ b/replication/src/agenticaita/agents_llm.py
+@@ -1,58 +1,185 @@
+ """LLM-backed AgenticAITA agents."""
+ from __future__ import annotations
+-import json, logging
++
++import json
++import logging
+ from dataclasses import asdict
+-from typing import Any, Mapping
++from typing import Any, Mapping, cast
++
+ from .agents import AnalystConfig, RuleBasedAnalyst
+ from .azte import TriggerEvent
+ from .cbd import CBDResult
+-from .contracts import AnalystDecision, RiskDecision
++from .contracts import AnalystDecision, RiskDecision, Signal
+ from .llm import LLMError, LLMProvider
+ from .risk import DeterministicRiskManager, RiskConfig
++
+ LOG = logging.getLogger(__name__)
+-ANALYST_PROMPT = "You are the AgenticAITA Analyst. Analyze the market and produce a trading signal. Respond ONLY in JSON: {signal: long|short|wait, confidence: float[0,1], entry_price, stop_loss, take_profit, size_usd, reasoning: string}. Your reasoning MUST cite the composite score, volatility regime, and orderbook context explicitly."
+-RISK_PROMPT = "You are the AgenticAITA Risk Manager. Your goal is Proportional Portfolio Balancing. Calculate size_usd based on the Analyst's confidence. Respond ONLY in JSON: {approved: bool, size_usd: float, negotiation_summary: string}."
++
++ANALYST_PROMPT = """\
++You are the AgenticAITA Analyst. Analyze the market and produce a trading signal.
++Respond ONLY in JSON with this schema:
++{signal: long|short|wait, confidence: float[0,1], entry_price, stop_loss,
++take_profit, size_usd, reasoning: string}.
++Your reasoning MUST cite the composite score, volatility regime, and orderbook
++context explicitly.
++"""
++
++RISK_PROMPT = """\
++You are the AgenticAITA Risk Manager. Your goal is Proportional Portfolio
++Balancing. Calculate size_usd based on the Analyst's confidence.
++Respond ONLY in JSON with this schema:
++{approved: bool, size_usd: float, negotiation_summary: string}.
++"""
++
+ 
+ class LLMAnalyst:
+     def __init__(self, provider: LLMProvider, config: AnalystConfig | None = None) -> None:
+-        self.provider, self.fallback, self.last_warning, self.last_prompt = provider, RuleBasedAnalyst(config), "", ""
++        self.provider = provider
++        self.fallback = RuleBasedAnalyst(config)
++        self.last_warning = ""
++        self.last_prompt = ""
++
+     def decide(self, event: TriggerEvent, cbd: CBDResult, episodic_memory: list[str] | None = None) -> AnalystDecision:
+-        self.last_warning = ""; self.last_prompt = analyst_message(event, cbd, episodic_memory or [])
+-        try: return analyst_json(self.provider.complete(ANALYST_PROMPT, self.last_prompt), event, cbd)
+-        except (LLMError, KeyError, TypeError, ValueError) as exc:
+-            self.last_warning = f"LLMAnalyst fallback to deterministic proxy: {exc}"; LOG.warning(self.last_warning)
++        self.last_warning = ""
++        self.last_prompt = analyst_message(event, cbd, episodic_memory or [])
++        try:
++            return analyst_json(self.provider.complete(ANALYST_PROMPT, self.last_prompt), event, cbd)
++        except (LLMError, TypeError, ValueError) as exc:
++            self.last_warning = f"LLMAnalyst fallback to deterministic proxy: {exc}"
++            LOG.warning(self.last_warning)
+             return self.fallback.decide(event, cbd, episodic_memory)
+ 
++
+ class LLMRiskManager:
+     def __init__(self, provider: LLMProvider, config: RiskConfig | None = None) -> None:
+-        self.provider, self.config, self.last_warning, self.last_prompt = provider, config or RiskConfig(), "", ""
++        self.provider = provider
++        self.config = config or RiskConfig()
++        self.last_warning = ""
++        self.last_prompt = ""
+         self.layer_a = DeterministicRiskManager(self.config)
++
+     def evaluate(self, decision: AnalystDecision) -> RiskDecision:
+-        self.last_warning = ""; gate = self.layer_a.evaluate(decision)
+-        if not gate.approved: return gate
+-        self.last_prompt = json.dumps({"analyst_decision": decision.to_dict(), "layer_a": gate.to_dict()}, sort_keys=True)
+-        try: return risk_json(self.provider.complete(RISK_PROMPT, self.last_prompt), self.config)
+-        except (LLMError, KeyError, TypeError, ValueError) as exc:
+-            self.last_warning = f"LLMRiskManager fallback to deterministic approval: {exc}"; LOG.warning(self.last_warning)
++        self.last_warning = ""
++        gate = self.layer_a.evaluate(decision)
++        if not gate.approved:
++            return gate
++
++        self.last_prompt = json.dumps(
++            {"analyst_decision": decision.to_dict(), "layer_a": gate.to_dict()},
++            sort_keys=True,
++        )
++        try:
++            return risk_json(self.provider.complete(RISK_PROMPT, self.last_prompt), self.config)
++        except (LLMError, TypeError, ValueError) as exc:
++            self.last_warning = f"LLMRiskManager fallback to deterministic approval: {exc}"
++            LOG.warning(self.last_warning)
+             return gate
++
++
++def volatility_regime(event: TriggerEvent) -> str:
++    if event.z_score >= 3 or event.abs_return >= 0.01:
++        return "high"
++    if event.z_score >= 2 or event.abs_return >= 0.003:
++        return "active"
++    return "low"
++
+ 
+ def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str]) -> str:
+-    regime = "high" if event.z_score >= 3 or event.abs_return >= 0.01 else "active" if event.z_score >= 2 or event.abs_return >= 0.003 else "low"
+-    return json.dumps({"trigger": asdict(event), "cbd": asdict(cbd), "composite_score": cbd.omega, "volatility_regime": regime, "orderbook_context": "not available; OHLCV trigger context is used as proxy", "episodic_memory_briefing": memory[-5:] or ["No prior reasoning on this asset is available."]}, sort_keys=True)
+-
+-def analyst_json(p: Mapping[str, Any], e: TriggerEvent, c: CBDResult) -> AnalystDecision:
+-    signal = str(p["signal"]).lower(); reason = str(p.get("reasoning", "")).strip()
+-    if signal not in {"long", "short", "wait"} or not reason: raise ValueError("invalid analyst JSON contract")
+-    return AnalystDecision(e.asset, signal, f(p["confidence"], 0, 1), f(p.get("entry_price", e.price), 0, None), float(p.get("stop_loss", e.price)), float(p.get("take_profit", e.price)), f(p["size_usd"], 0, None), c.omega, e.z_score, reason)  # type: ignore[arg-type]
+-
+-def risk_json(p: Mapping[str, Any], c: RiskConfig) -> RiskDecision:
+-    approved = p["approved"] if isinstance(p["approved"], bool) else str(p["approved"]).lower() == "true"; summary = str(p.get("negotiation_summary", "")).strip()
+-    if not summary: raise ValueError("invalid risk JSON contract")
+-    if not approved: return RiskDecision(False, 0.0, "llm_layer_b_rejected", summary)
+-    size = f(p["size_usd"], 0, c.max_position_size_usd)
+-    return RiskDecision(size > 0, size if size > 0 else 0.0, "" if size > 0 else "llm_layer_b_zero_size", summary)
+-
+-def f(v: Any, lo: float | None, hi: float | None) -> float:
+-    x = float(v)
+-    if (lo is not None and x < lo) or (hi is not None and x > hi): raise ValueError("number outside bounds")
+-    return x
++    return json.dumps(
++        {
++            "trigger": asdict(event),
++            "cbd": asdict(cbd),
++            "composite_score": cbd.omega,
++            "volatility_regime": volatility_regime(event),
++            "orderbook_context": "not available; OHLCV trigger context is used as proxy",
++            "episodic_memory_briefing": memory[-5:] or ["No prior reasoning on this asset is available."],
++        },
++        sort_keys=True,
++    )
++
++
++def analyst_json(payload: Mapping[str, Any], event: TriggerEvent, cbd: CBDResult) -> AnalystDecision:
++    signal = parse_signal(payload)
++    reasoning = text_field(payload, "reasoning")
++    return AnalystDecision(
++        asset=event.asset,
++        signal=signal,
++        confidence=float_field(payload, "confidence", minimum=0.0, maximum=1.0),
++        entry_price=float_field(payload, "entry_price", default=event.price, minimum=0.0, exclusive_minimum=True),
++        stop_loss=float_field(payload, "stop_loss", default=event.price, minimum=0.0, exclusive_minimum=True),
++        take_profit=float_field(payload, "take_profit", default=event.price, minimum=0.0, exclusive_minimum=True),
++        size_usd=float_field(payload, "size_usd", minimum=0.0),
++        cbd_score=cbd.omega,
++        z_score=event.z_score,
++        reasoning=reasoning,
++    )
++
++
++def risk_json(payload: Mapping[str, Any], config: RiskConfig) -> RiskDecision:
++    approved = bool_field(payload, "approved")
++    summary = text_field(payload, "negotiation_summary")
++    if not approved:
++        return RiskDecision(False, 0.0, "llm_layer_b_rejected", summary)
++
++    size = float_field(payload, "size_usd", minimum=0.0, maximum=config.max_position_size_usd)
++    return RiskDecision(
++        approved=size > 0,
++        size_usd=size if size > 0 else 0.0,
++        rejection_reason="" if size > 0 else "llm_layer_b_zero_size",
++        negotiation_summary=summary,
++    )
++
++
++def parse_signal(payload: Mapping[str, Any]) -> Signal:
++    value = str(required_field(payload, "signal")).lower()
++    if value not in {"long", "short", "wait"}:
++        raise ValueError(f"signal must be one of long, short, wait; got {value!r}")
++    return cast(Signal, value)
++
++
++def bool_field(payload: Mapping[str, Any], field: str) -> bool:
++    value = required_field(payload, field)
++    if isinstance(value, bool):
++        return value
++    if isinstance(value, str) and value.lower() in {"true", "false"}:
++        return value.lower() == "true"
++    raise ValueError(f"{field} must be boolean, got {value!r}")
++
++
++def text_field(payload: Mapping[str, Any], field: str) -> str:
++    value = str(required_field(payload, field)).strip()
++    if not value:
++        raise ValueError(f"{field} must be a non-empty string")
++    return value
++
++
++def float_field(
++    payload: Mapping[str, Any],
++    field: str,
++    *,
++    default: float | None = None,
++    minimum: float | None = None,
++    maximum: float | None = None,
++    exclusive_minimum: bool = False,
++) -> float:
++    raw = payload.get(field, default)
++    if raw is None:
++        raise ValueError(f"{field} is required")
++    try:
++        value = float(raw)
++    except (TypeError, ValueError) as exc:
++        raise ValueError(f"{field} must be numeric, got {raw!r}") from exc
++    if minimum is not None:
++        too_low = value <= minimum if exclusive_minimum else value < minimum
++        if too_low:
++            qualifier = "greater than" if exclusive_minimum else "at least"
++            raise ValueError(f"{field} must be {qualifier} {minimum}, got {value}")
++    if maximum is not None and value > maximum:
++        raise ValueError(f"{field} must be at most {maximum}, got {value}")
++    return value
++
++
++def required_field(payload: Mapping[str, Any], field: str) -> Any:
++    if field not in payload:
++        raise ValueError(f"{field} is required")
++    return payload[field]
+diff --git a/replication/src/agenticaita/llm.py b/replication/src/agenticaita/llm.py
+index 0e06e00..2b2819f 100644
+--- a/replication/src/agenticaita/llm.py
++++ b/replication/src/agenticaita/llm.py
+@@ -9,6 +9,7 @@ from __future__ import annotations
+ import json
+ import os
+ import re
++import time
+ import urllib.error
+ import urllib.request
+ from abc import ABC, abstractmethod
+@@ -35,6 +36,8 @@ class LLMConfig:
+     audit_log_path: str | None = None
+     timeout_seconds: float = 60.0
+     api_key: str | None = None
++    max_retries: int = 2
++    retry_backoff_seconds: float = 0.25
+ 
+     @classmethod
+     def from_mapping(cls, data: Mapping[str, Any] | None) -> "LLMConfig":
+@@ -53,6 +56,8 @@ class LLMConfig:
+             audit_log_path=str(raw["audit_log_path"]) if raw.get("audit_log_path") else None,
+             timeout_seconds=float(raw.get("timeout_seconds", cls.timeout_seconds)),
+             api_key=str(raw["api_key"]) if raw.get("api_key") else None,
++            max_retries=int(raw.get("max_retries", cls.max_retries)),
++            retry_backoff_seconds=float(raw.get("retry_backoff_seconds", cls.retry_backoff_seconds)),
+         )
+ 
+     def resolved_api_key(self) -> str:
+@@ -75,6 +80,9 @@ class LLMProvider(ABC):
+ class OpenRouterProvider(LLMProvider):
+     """OpenRouter implementation using the OpenAI-compatible chat endpoint."""
+ 
++    TRANSIENT_HTTP_STATUS = {429, 500, 502, 503, 504}
++    PERMANENT_HTTP_STATUS = {400, 401, 403, 404}
++
+     def __init__(self, config: LLMConfig | Mapping[str, Any] | None = None) -> None:
+         self.config = config if isinstance(config, LLMConfig) else LLMConfig.from_mapping(config)
+ 
+@@ -101,16 +109,32 @@ class OpenRouterProvider(LLMProvider):
+             method="POST",
+         )
+ 
+-        try:
+-            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310 - URL is explicit provider config.
+-                raw_body = response.read().decode("utf-8")
+-        except urllib.error.URLError as exc:
+-            raise LLMError(f"OpenRouter request failed: {exc}") from exc
+-
++        raw_body = self._urlopen_with_retries(request)
+         parsed = self._parse_chat_response(raw_body)
+         self._audit(system_prompt, user_message, raw_body, parsed)
+         return parsed
+ 
++    def _urlopen_with_retries(self, request: urllib.request.Request) -> str:
++        attempts = max(0, self.config.max_retries) + 1
++        last_error: urllib.error.URLError | None = None
++        for attempt in range(1, attempts + 1):
++            try:
++                with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310 - URL is explicit provider config.
++                    return response.read().decode("utf-8")
++            except urllib.error.HTTPError as exc:
++                if exc.code in self.PERMANENT_HTTP_STATUS:
++                    raise LLMError(f"OpenRouter permanent HTTP error {exc.code}: {exc.reason}") from exc
++                if exc.code not in self.TRANSIENT_HTTP_STATUS:
++                    raise LLMError(f"OpenRouter HTTP error {exc.code}: {exc.reason}") from exc
++                last_error = exc
++            except urllib.error.URLError as exc:
++                last_error = exc
++
++            if attempt < attempts:
++                time.sleep(self.config.retry_backoff_seconds * attempt)
++
++        raise LLMError(f"OpenRouter request failed after {attempts} attempt(s): {last_error}") from last_error
++
+     def _parse_chat_response(self, raw_body: str) -> dict[str, Any]:
+         try:
+             payload = json.loads(raw_body)
+diff --git a/replication/tests/test_agents_llm.py b/replication/tests/test_agents_llm.py
+index 855fcbf..d773331 100644
+--- a/replication/tests/test_agents_llm.py
++++ b/replication/tests/test_agents_llm.py
+@@ -2,7 +2,7 @@ from __future__ import annotations
+ import sqlite3
+ from pathlib import Path
+ import pytest
+-from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager
++from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager, analyst_json, risk_json
+ from src.agenticaita.azte import TriggerEvent
+ from src.agenticaita.cbd import CBDResult
+ from src.agenticaita.contracts import AnalystDecision
+@@ -28,6 +28,32 @@ def test_llm_analyst_contract_memory_and_fallback():
+     assert "prior BTC reasoning" in p.calls[0][1]
+     assert LLMAnalyst(FakeProvider(error=LLMError("bad json"))).decide(ev(), cb()).signal in {"long", "short", "wait"}
+ 
++
++def test_analyst_json_reports_field_level_validation_errors():
++    payload = {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":"N/A","take_profit":102,"size_usd":188,"reasoning":"ok"}
++    with pytest.raises(ValueError, match="stop_loss must be numeric"):
++        analyst_json(payload, ev(), cb())
++
++    payload = {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":0,"take_profit":102,"size_usd":188,"reasoning":"ok"}
++    with pytest.raises(ValueError, match="stop_loss must be greater than 0.0"):
++        analyst_json(payload, ev(), cb())
++
++    payload = {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":99,"take_profit":-1,"size_usd":188,"reasoning":"ok"}
++    with pytest.raises(ValueError, match="take_profit must be greater than 0.0"):
++        analyst_json(payload, ev(), cb())
++
++
++def test_risk_json_reports_field_level_validation_errors():
++    with pytest.raises(ValueError, match="approved must be boolean"):
++        risk_json({"approved":"maybe","size_usd":100,"negotiation_summary":"ok"}, RiskConfig())
++
++    with pytest.raises(ValueError, match="size_usd must be at most 500.0"):
++        risk_json({"approved":True,"size_usd":501,"negotiation_summary":"ok"}, RiskConfig(max_position_size_usd=500.0))
++
++    with pytest.raises(ValueError, match="negotiation_summary must be a non-empty string"):
++        risk_json({"approved":True,"size_usd":100,"negotiation_summary":""}, RiskConfig())
++
++
+ def test_llm_risk_manager_preserves_hard_gate_and_uses_layer_b():
+     p = FakeProvider([{"approved":True,"size_usd":120,"negotiation_summary":"Reduced size for proportional balancing."}])
+     m = LLMRiskManager(p, RiskConfig(confidence_gate=0.6))
+@@ -36,6 +62,7 @@ def test_llm_risk_manager_preserves_hard_gate_and_uses_layer_b():
+     r = m.evaluate(AnalystDecision("BTC","long",0.9,100,99,102,188,0.6,3,"test"))
+     assert r.approved and r.size_usd == 120.0 and len(p.calls) == 1
+ 
++
+ def test_pipeline_memory_and_sqlite(tmp_path: Path):
+     pd = pytest.importorskip("pandas")
+     p = FakeProvider([
+diff --git a/replication/tests/test_llm.py b/replication/tests/test_llm.py
+index e960ab2..aa30a83 100644
+--- a/replication/tests/test_llm.py
++++ b/replication/tests/test_llm.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import json
++import urllib.error
+ from pathlib import Path
+ 
+ import pytest
+@@ -22,6 +23,13 @@ class FakeHTTPResponse:
+         return json.dumps(self.payload).encode("utf-8")
+ 
+ 
++RESPONSE_PAYLOAD = {"choices": [{"message": {"content": '{"approved": true, "size_usd": 100, "negotiation_summary": "ok"}'}}]}
++
++
++def http_error(status: int) -> urllib.error.HTTPError:
++    return urllib.error.HTTPError("https://openrouter.ai/api/v1/chat/completions", status, f"status {status}", {}, None)
++
++
+ def test_openrouter_provider_parses_json_response_and_writes_audit_log(monkeypatch, tmp_path: Path) -> None:
+     captured: dict = {}
+     response_payload = {
+@@ -107,6 +115,40 @@ def test_openrouter_provider_raises_when_api_key_missing(monkeypatch) -> None:
+         provider.complete("system", "user")
+ 
+ 
++@pytest.mark.parametrize("status", [429, 503])
++def test_openrouter_provider_retries_transient_http_errors(monkeypatch, status: int) -> None:
++    calls = []
++
++    def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
++        calls.append(request)
++        if len(calls) == 1:
++            raise http_error(status)
++        return FakeHTTPResponse(RESPONSE_PAYLOAD)
++
++    monkeypatch.setattr("src.agenticaita.llm.urllib.request.urlopen", fake_urlopen)
++    monkeypatch.setattr("src.agenticaita.llm.time.sleep", lambda _seconds: None)
++
++    provider = OpenRouterProvider(LLMConfig(api_key="config-key", max_retries=1, retry_backoff_seconds=0))
++    assert provider.complete("system", "user")["approved"] is True
++    assert len(calls) == 2
++
++
++@pytest.mark.parametrize("status", [401, 403])
++def test_openrouter_provider_does_not_retry_permanent_http_errors(monkeypatch, status: int) -> None:
++    calls = []
++
++    def fake_urlopen(request, timeout):  # noqa: ANN001, ARG001
++        calls.append(request)
++        raise http_error(status)
++
++    monkeypatch.setattr("src.agenticaita.llm.urllib.request.urlopen", fake_urlopen)
++
++    provider = OpenRouterProvider(LLMConfig(api_key="config-key", max_retries=2, retry_backoff_seconds=0))
++    with pytest.raises(LLMError, match=f"permanent HTTP error {status}"):
++        provider.complete("system", "user")
++    assert len(calls) == 1
++
++
+ def test_parse_json_object_accepts_fenced_json_and_rejects_non_object() -> None:
+     assert parse_json_object('```json\n{"signal": "wait", "confidence": 0.1}\n```') == {"signal": "wait", "confidence": 0.1}
+ 
