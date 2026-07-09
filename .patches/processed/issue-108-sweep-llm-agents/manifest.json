@@ -1,0 +1,15 @@
+{
+  "base_ref": "main",
+  "base_sha": "85f2dcc1d9258fadf87680e4bbf86662e3195f5a",
+  "commit_message": "Add LLM agent support to calibration sweep",
+  "implementation_branch": "feature/108-sweep-llm-agents",
+  "issue_number": 108,
+  "pr_body": "Closes #108\n\n## Summary\n- Add `--agents deterministic|llm` to `sweep.py`.\n- Reuse #110 LLM config override, prompt, and volatility-regime wiring for sweep runs.\n- Add LLM sweep tests for parser coverage, simulator wiring, and no-key deterministic fallback.\n\n## Validation\n- `python -m py_compile replication/sweep.py replication/tests/test_sweep_llm.py`\n- `git apply --check issue108.patch`\n- `python /mnt/data/validate_patch_submission_envelope.py .patches/inbox/issue-108-sweep-llm-agents.patch-submission --repo-root . --base-ref HEAD`",
+  "pr_title": "Add LLM agent support to calibration sweep",
+  "schema_version": 2,
+  "validation": [
+    "python -m py_compile replication/sweep.py replication/tests/test_sweep_llm.py",
+    "git apply --check issue108.patch",
+    "python /mnt/data/validate_patch_submission_envelope.py .patches/inbox/issue-108-sweep-llm-agents.patch-submission --repo-root . --base-ref HEAD"
+  ]
+}
