@@ -1,0 +1,16 @@
+{
+  "base_ref": "main",
+  "base_sha": "592c6df0b745afde5e099ded947e48672730cba1",
+  "commit_message": "Refactor LLM agents and provider retry handling (#107)",
+  "implementation_branch": "feature/107-llm-agent-refactor-retry-validation-v2",
+  "issue_number": 107,
+  "pr_body": "## Summary\n\nCloses #107.\n\nRefactors the LLM-backed analyst/risk agents and OpenRouter provider error handling so the LLM path is more readable, produces field-attributed validation failures, and retries transient provider failures without retrying permanent auth/permission errors.\n\n## Changes\n\n- Breaks long prompt constants into multi-line template strings.\n- Replaces compact one-line LLM agent methods with explicit control flow.\n- Adds helper validators for required fields, booleans, signals, non-empty text, and numeric bounds.\n- Adds positive validation for analyst `entry_price`, `stop_loss`, and `take_profit`.\n- Adds configurable OpenRouter retry count/backoff defaults to `LLMConfig`.\n- Retries transient OpenRouter HTTP errors including 429 and 503, and fails immediately for permanent 401/403 errors.\n- Adds unit tests for field-attributed validation errors and provider retry/permanent-failure behaviour.\n\n## Validation\n\n- [x] `cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q` \u2014 14 passed\n- [x] `cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/llm.py`\n- [x] `grep -n \"type: ignore\" replication/src/agenticaita/agents_llm.py || true` \u2014 no matches\n- [x] `git apply --check issue107-v2.patch` against base `592c6df0b745afde5e099ded947e48672730cba1` using a proper git-format patch\n\n## Scope and caveats\n\n- Scoped to #107 only.\n- CLI override wiring, prompt-directory support, sweep support, and live OpenRouter smoke execution remain for follow-up issues.\n- A first envelope failed at the broker apply step because the diff lacked `diff --git` headers; this v2 submission uses a proper git-format patch and a fresh submission id/branch.\n- No generated market data, SQLite DB, validation result directory, replication output, cache, or broker archive is included.\n\n## Auto-merge\n\nAuto-merge was not enabled by the submitting agent because the repository reports auto-merge as disabled.\n",
+  "pr_title": "Refactor LLM agents and provider retry handling",
+  "schema_version": 2,
+  "validation": [
+    "cd replication && python -m pytest tests/test_llm.py tests/test_agents_llm.py -q (14 passed)",
+    "cd replication && python -m compileall -q src/agenticaita/agents_llm.py src/agenticaita/llm.py (passed)",
+    "grep -n \"type: ignore\" replication/src/agenticaita/agents_llm.py || true (no matches)",
+    "git apply --check issue107-v2.patch against base 592c6df0b745afde5e099ded947e48672730cba1 (passed with proper git-format diff headers)"
+  ]
+}
