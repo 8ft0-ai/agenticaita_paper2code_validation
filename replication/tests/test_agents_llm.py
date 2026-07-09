@@ -2,7 +2,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 import pytest
-from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager, analyst_json, risk_json
+from src.agenticaita.agents_llm import LLMAnalyst, LLMRiskManager, VolatilityRegimeConfig, analyst_json, risk_json, volatility_regime
 from src.agenticaita.azte import TriggerEvent
 from src.agenticaita.cbd import CBDResult
 from src.agenticaita.contracts import AnalystDecision
@@ -41,6 +41,15 @@ def test_analyst_json_reports_field_level_validation_errors():
     payload = {"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":99,"take_profit":-1,"size_usd":188,"reasoning":"ok"}
     with pytest.raises(ValueError, match="take_profit must be greater than 0.0"):
         analyst_json(payload, ev(), cb())
+
+
+def test_llm_agents_accept_configurable_prompts_and_volatility_regime():
+    p = FakeProvider([{"signal":"long","confidence":0.7,"entry_price":100,"stop_loss":99,"take_profit":102,"size_usd":188,"reasoning":"Composite score 0.60, low volatility regime, orderbook context unavailable."}, {"approved":True,"size_usd":120,"negotiation_summary":"Custom risk prompt accepted."}])
+    regime = VolatilityRegimeConfig(high_z_score=10, active_z_score=9, high_abs_return=0.5, active_abs_return=0.4)
+    decision = LLMAnalyst(p, system_prompt="custom analyst prompt", volatility_regime_config=regime).decide(ev(), cb())
+    LLMRiskManager(p, RiskConfig(confidence_gate=0.6), system_prompt="custom risk prompt").evaluate(decision)
+    assert p.calls[0][0] == "custom analyst prompt" and '"volatility_regime": "low"' in p.calls[0][1]
+    assert p.calls[1][0] == "custom risk prompt" and volatility_regime(ev(), regime) == "low"
 
 
 def test_risk_json_reports_field_level_validation_errors():

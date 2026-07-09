@@ -28,10 +28,21 @@ llm:
   max_tokens: 512
   audit_log_path: results/llm_audit.jsonl
   timeout_seconds: 60
+  max_retries: 2
+  retry_backoff_seconds: 0.25
 agents:
   analyst: deterministic
   risk_manager: deterministic
   episodic_memory_depth: 5
+  llm:
+    volatility_regime:
+      high_z_score: 3.0
+      active_z_score: 2.0
+      high_abs_return: 0.01
+      active_abs_return: 0.003
+    prompts:
+      analyst_system_prompt: null
+      risk_system_prompt: null
 cost_scenarios:
   zero_cost: 0.0
   conservative_maker_only: 0.0004
