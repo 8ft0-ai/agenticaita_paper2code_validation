@@ -1,0 +1,16 @@
+{
+  "base_ref": "main",
+  "base_sha": "882830406f0231f628f9b80f803997b8eddfdaf9",
+  "commit_message": "Add local patch submission envelope validator",
+  "implementation_branch": "feature/112-patch-envelope-validator",
+  "issue_number": 112,
+  "pr_body": "Closes #112\n\n## Summary\n- Add `scripts/validate_patch_submission_envelope.py` to validate broker envelopes locally.\n- Extract the embedded patch exactly and run `git apply --check` against a detached worktree.\n- Surface `git apply --check` stdout/stderr on failure.\n- Document the command in the repo profile.\n\n## Validation\n- `python -m py_compile scripts/validate_patch_submission_envelope.py tests/test_validate_patch_submission_envelope.py`\n- `pytest -q tests/test_validate_patch_submission_envelope.py`\n- `git apply --check issue112.patch`\n- local envelope validator run against extracted patch in a clean local worktree",
+  "pr_title": "Add local patch-submission envelope validator",
+  "schema_version": 2,
+  "validation": [
+    "python -m py_compile scripts/validate_patch_submission_envelope.py tests/test_validate_patch_submission_envelope.py",
+    "pytest -q tests/test_validate_patch_submission_envelope.py",
+    "git apply --check issue112.patch",
+    "local envelope validator run against extracted patch in a clean local worktree"
+  ]
+}
