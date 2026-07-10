@@ -1,0 +1,14 @@
+{
+  "base_ref": "main",
+  "commit_message": "Document deterministic signal-mix divergence",
+  "implementation_branch": "issue-121-deterministic-signal-mix-investigation",
+  "issue_number": 121,
+  "pr_body": "Closes #121\n\nExplains why the sign-based deterministic proxy should not be altered to imitate the paper's LLM-specific long bias, records the options considered, and directs behavioural comparison to the LLM-backed replication path.",
+  "pr_title": "Document deterministic signal-mix investigation",
+  "schema_version": 2,
+  "validation": [
+    "git diff --check",
+    "git apply --check against main d6db45d6785c2c8dade086f9f8e73103fa682f4c",
+    "documentation-only investigation; deterministic signal logic intentionally unchanged"
+  ]
+}
