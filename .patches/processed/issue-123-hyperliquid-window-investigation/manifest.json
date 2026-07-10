@@ -1,0 +1,14 @@
+{
+  "base_ref": "main",
+  "commit_message": "Document Hyperliquid paper-window data limits",
+  "implementation_branch": "issue-123-hyperliquid-window-investigation",
+  "issue_number": 123,
+  "pr_body": "Closes #123\n\nRecords the tested paper-window commands and results, explains the official 5,000-candle retention boundary and historical archive contents, and documents why Binance USD-M or Bybit remains necessary as a labelled fallback.",
+  "pr_title": "Document Hyperliquid paper-window OHLCV investigation",
+  "schema_version": 2,
+  "validation": [
+    "git diff --check",
+    "git apply --check against reconstructed files from main 502c769784336040ece537c41b4cd3fa85e0a970",
+    "documentation-only change; no runtime tests required"
+  ]
+}
