@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Validate a patch-submission envelope before pushing it to the broker.
+
+The patch-submission broker applies the unified diff extracted from a
+``.patch-submission`` envelope, not a standalone ``patch.diff`` produced during
+implementation. This script mirrors the local parts of that broker flow: parse
+the envelope, extract the embedded patch exactly, and run ``git apply --check``
+against a clean detached worktree at the requested base ref.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
+
+MANIFEST_MARKER = "--- PATCH_SUBMISSION_MANIFEST_JSON ---"
+DIFF_MARKER = "--- PATCH_SUBMISSION_UNIFIED_DIFF ---"
+SCHEMA_HEADER = "PATCH_SUBMISSION_SCHEMA_VERSION: 2"
+REQUIRED_FIELDS = (
+    "schema_version",
+    "issue_number",
+    "base_ref",
+    "implementation_branch",
+    "commit_message",
+    "pr_title",
+)
+
+
+class ValidationError(RuntimeError):
+    """Raised when an envelope cannot be validated locally."""
+
+
+@dataclass(frozen=True)
+class Envelope:
+    manifest: dict[str, Any]
+    patch_text: str
+
+
+def run(cmd: list[str], *, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess and capture output for useful diagnostics."""
+
+    result = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False)
+    if check and result.returncode != 0:
+        raise ValidationError(format_command_failure(cmd, result))
+    return result
+
+
+def format_command_failure(cmd: Iterable[str], result: subprocess.CompletedProcess[str]) -> str:
+    lines = [
+        f"Command failed with exit code {result.returncode}: {' '.join(cmd)}",
+    ]
+    if result.stdout:
+        lines.extend(["", "stdout:", result.stdout.rstrip()])
+    if result.stderr:
+        lines.extend(["", "stderr:", result.stderr.rstrip()])
+    return "\n".join(lines)
+
+
+def parse_envelope_text(text: str) -> Envelope:
+    """Parse a schema-v2 patch-submission envelope."""
+
+    if MANIFEST_MARKER not in text or DIFF_MARKER not in text:
+        raise ValidationError("Envelope must contain manifest and unified diff markers.")
+
+    header, rest = text.split(MANIFEST_MARKER, 1)
+    manifest_text, patch_text = rest.split(DIFF_MARKER, 1)
+
+    if SCHEMA_HEADER not in header.strip():
+        raise ValidationError(f"Envelope header must include {SCHEMA_HEADER}.")
+
+    patch_text = patch_text.lstrip("\r\n")
+    if not patch_text.strip():
+        raise ValidationError("Unified diff section is empty.")
+    if not patch_text.startswith("diff --git "):
+        raise ValidationError("Unified diff section must start with 'diff --git '.")
+    if not patch_text.endswith("\n"):
+        raise ValidationError("Unified diff section must end with a newline.")
+
+    try:
+        manifest = json.loads(manifest_text.strip())
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"Invalid manifest JSON: {exc}") from exc
+
+    validate_manifest(manifest)
+    return Envelope(manifest=manifest, patch_text=patch_text)
+
+
+def validate_manifest(manifest: dict[str, Any]) -> None:
+    missing = [key for key in REQUIRED_FIELDS if str(manifest.get(key, "")).strip() == ""]
+    if missing:
+        raise ValidationError("Missing required field(s): " + ", ".join(missing))
+
+    if str(manifest["schema_version"]) != "2":
+        raise ValidationError("schema_version must be 2 for .patch-submission envelopes.")
+
+    try:
+        issue_number = int(manifest["issue_number"])
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("issue_number must be an integer.") from exc
+    if issue_number <= 0:
+        raise ValidationError("issue_number must be positive.")
+
+    if str(manifest["base_ref"]).strip() != "main":
+        raise ValidationError("Only base_ref=main is supported.")
+
+    branch = str(manifest["implementation_branch"]).strip()
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch):
+        raise ValidationError(f"Invalid implementation_branch: {branch}")
+    if branch in {"main", "master", "patch-submissions"} or branch.startswith(("/", ".", "refs/")) or branch.endswith("/") or ".." in branch or "//" in branch:
+        raise ValidationError(f"Unsafe implementation_branch: {branch}")
+
+    for field in ("commit_message", "pr_title"):
+        value = str(manifest[field]).strip()
+        if "\n" in value or "\r" in value:
+            raise ValidationError(f"{field} must be a single line.")
+
+    validation = manifest.get("validation", []) or []
+    if not isinstance(validation, list) or not all(isinstance(item, str) for item in validation):
+        raise ValidationError("validation must be a list of strings.")
+
+
+def maybe_fetch_base(repo_root: Path, base_ref: str, no_fetch: bool) -> None:
+    if no_fetch:
+        return
+    if base_ref == "origin/main" or base_ref.startswith("origin/"):
+        remote_branch = base_ref.split("/", 1)[1]
+        run(["git", "fetch", "origin", remote_branch], cwd=repo_root)
+
+
+def validate_base_sha(repo_root: Path, base_ref: str, manifest: dict[str, Any]) -> str:
+    base_sha = run(["git", "rev-parse", base_ref], cwd=repo_root).stdout.strip()
+    manifest_base_sha = str(manifest.get("base_sha", "")).strip()
+    if manifest_base_sha and manifest_base_sha != base_sha:
+        raise ValidationError(f"Base SHA mismatch: manifest={manifest_base_sha} current={base_sha}")
+    return base_sha
+
+
+def validate_patch_with_worktree(repo_root: Path, base_ref: str, patch_path: Path) -> list[str]:
+    with tempfile.TemporaryDirectory(prefix="patch-envelope-worktree-") as temp_dir:
+        worktree = Path(temp_dir) / "worktree"
+        added = False
+        try:
+            run(["git", "worktree", "add", "--detach", str(worktree), base_ref], cwd=repo_root)
+            added = True
+            apply_check = run(["git", "apply", "--check", str(patch_path)], cwd=worktree, check=False)
+            if apply_check.returncode != 0:
+                raise ValidationError(format_command_failure(["git", "apply", "--check", str(patch_path)], apply_check))
+
+            numstat = run(["git", "apply", "--numstat", str(patch_path)], cwd=worktree).stdout
+            changed_paths = [line.split("\t")[-1] for line in numstat.splitlines() if line.strip()]
+            if not changed_paths:
+                raise ValidationError("Patch affects no files.")
+            return changed_paths
+        finally:
+            if added:
+                subprocess.run(["git", "worktree", "remove", "--force", str(worktree)], cwd=repo_root, text=True, capture_output=True, check=False)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("envelope", type=Path, help="Path to .patch-submission envelope")
+    parser.add_argument("--repo-root", type=Path, default=Path("."), help="Repository root containing the target worktree")
+    parser.add_argument("--base-ref", default="origin/main", help="Git ref to validate against, usually origin/main")
+    parser.add_argument("--no-fetch", action="store_true", help="Do not fetch origin before resolving --base-ref")
+    parser.add_argument("--extracted-patch-out", type=Path, default=None, help="Optional path to write the extracted patch.diff")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    repo_root = args.repo_root.resolve()
+    envelope_path = args.envelope if args.envelope.is_absolute() else (repo_root / args.envelope)
+
+    try:
+        if not envelope_path.is_file():
+            raise ValidationError(f"Envelope not found: {envelope_path}")
+        run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_root)
+        envelope = parse_envelope_text(envelope_path.read_text(encoding="utf-8"))
+        maybe_fetch_base(repo_root, args.base_ref, args.no_fetch)
+        base_sha = validate_base_sha(repo_root, args.base_ref, envelope.manifest)
+
+        with tempfile.TemporaryDirectory(prefix="patch-envelope-") as temp_dir:
+            extracted_patch = Path(temp_dir) / "patch.diff"
+            extracted_patch.write_text(envelope.patch_text, encoding="utf-8")
+            if args.extracted_patch_out:
+                out_path = args.extracted_patch_out if args.extracted_patch_out.is_absolute() else (repo_root / args.extracted_patch_out)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(envelope.patch_text, encoding="utf-8")
+
+            changed_paths = validate_patch_with_worktree(repo_root, args.base_ref, extracted_patch)
+
+    except ValidationError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+    print("PASS: envelope patch applies cleanly")
+    print(f"Issue: #{int(envelope.manifest['issue_number'])}")
+    print(f"Implementation branch: {envelope.manifest['implementation_branch']}")
+    print(f"Base ref: {args.base_ref}")
+    print(f"Base sha: {base_sha}")
+    print("Changed files:")
+    for path in changed_paths:
+        print(f"- {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
