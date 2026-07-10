@@ -1,0 +1,78 @@
+# Hyperliquid paper-window OHLCV investigation
+
+## Conclusion
+
+The AGENTICAITA paper window, `2026-04-06T00:00:00Z` through `2026-04-11T23:59:59Z`, cannot be recovered as one-minute Hyperliquid OHLCV from the currently documented public candle endpoint. Binance USD-M or Bybit remains necessary for a reproducible public-data fallback.
+
+This conclusion concerns historical candle availability. It does not imply that Hyperliquid lacks current candles, L2 history, asset contexts, or trade-level archives.
+
+## Existing repository attempt
+
+The repository previously queried 15 known perpetual symbols through CCXT using the paper window and one-minute interval:
+
+```bash
+python scripts/fetch_hyperliquid_ohlcv.py \
+  --symbols "BTC/USDC:USDC,ETH/USDC:USDC,SOL/USDC:USDC,AVAX/USDC:USDC,DOGE/USDC:USDC,ADA/USDC:USDC,XRP/USDC:USDC,DOT/USDC:USDC,FARTCOIN/USDC:USDC,XPL/USDC:USDC,CC/USDC:USDC,HEMI/USDC:USDC,S/USDC:USDC,BCH/USDC:USDC,ETC/USDC:USDC" \
+  --out data/hyperliquid_ohlcv_real_subset \
+  --max-retries 2 \
+  --retry-sleep 1
+```
+
+Observed result:
+
+| Item | Result |
+| --- | ---: |
+| Symbols requested | 15 |
+| Successful symbol requests | 15 |
+| OHLCV candles returned per symbol | 0 |
+| Funding rows returned per symbol | 144 |
+
+The successful funding responses show that the venue and symbol mapping were broadly functional. The missing candles were therefore not explained by a general connectivity failure.
+
+## Official candle endpoint constraint
+
+Hyperliquid documents the `candleSnapshot` request on `POST https://api.hyperliquid.xyz/info`, using a native coin name such as `BTC`, an interval, and `startTime`/`endTime` in epoch milliseconds.
+
+The same documentation states that **only the most recent 5,000 candles are available**. At a one-minute interval, this is 5,000 minutes, or approximately 83 hours and 20 minutes. By July 2026, the April 6–11 paper window is far outside that retention range.
+
+Consequences:
+
+- retrying smaller paper-window sub-ranges cannot bypass the retention boundary;
+- changing CCXT pagination or request limits cannot retrieve candles the endpoint no longer retains;
+- using native Hyperliquid coin names rather than CCXT unified symbols may improve current-window smoke tests, but cannot recover the expired paper window;
+- requesting a coarser interval would not satisfy the paper's disclosed one-minute input requirement.
+
+Official reference: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#candle-snapshot>
+
+## Official historical archives
+
+Hyperliquid's historical-data documentation describes requester-pays S3 archives. The documented `hyperliquid-archive` market-data bucket contains L2 book snapshots and asset contexts, and explicitly states that no candle dataset is provided there.
+
+The documentation also identifies trade/fill and node-history buckets. In principle, one-minute OHLCV could be reconstructed from complete trade-level records, but that would be a derived dataset rather than the venue's historical candle series. It would also require validating symbol coverage, timestamp continuity, trade semantics, missing intervals, and requester-pays transfer cost. That is a separate reconstruction project and would not restore the original paper's LLM decisions, order-book snapshots used by the agents, or SQLite logs.
+
+Official reference: <https://hyperliquid.gitbook.io/hyperliquid-docs/historical-data>
+
+## Reproducible current-window smoke probe
+
+A current-window direct API smoke test can still verify that the raw endpoint and native coin naming work:
+
+```bash
+now_ms=$(python -c 'import time; print(int(time.time() * 1000))')
+start_ms=$((now_ms - 60 * 60 * 1000))
+
+curl -sS https://api.hyperliquid.xyz/info \
+  -H 'Content-Type: application/json' \
+  -d "{\"type\":\"candleSnapshot\",\"req\":{\"coin\":\"BTC\",\"interval\":\"1m\",\"startTime\":${start_ms},\"endTime\":${now_ms}}}"
+```
+
+This smoke probe is useful for validating current API behaviour only. A successful response must not be interpreted as evidence that the April paper window is recoverable.
+
+## Replication decision
+
+For the paper-window replication:
+
+1. retain Hyperliquid as the preferred conceptual venue;
+2. record the zero-candle CCXT result and the documented 5,000-candle retention limit;
+3. use Binance USD-M or Bybit one-minute perpetual data as a clearly labelled venue substitution;
+4. avoid claiming exact historical or execution equivalence;
+5. do not commit downloaded market databases or reconstructed archive outputs.
