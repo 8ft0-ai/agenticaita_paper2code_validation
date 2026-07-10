@@ -82,4 +82,5 @@ def test_real_data_workflow_dry_run_includes_paper_comparison(tmp_path: Path) ->
     assert "scripts/compare_replication_to_paper.py" in result.stdout
     assert str(replication_out / "summary.json") in result.stdout
     assert str(replication_out / "trades.csv") in result.stdout
+    assert str(replication_out / "ohlcv_used.csv") in result.stdout
     assert str(paper_comparison) in result.stdout

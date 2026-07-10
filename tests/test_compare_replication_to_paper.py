@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 
-from scripts.compare_replication_to_paper import build_rows, read_trade_metrics, write_markdown
+from scripts.compare_replication_to_paper import (
+    build_rows,
+    read_btc_benchmark_metrics,
+    read_trade_metrics,
+    write_markdown,
+)
 
 
 def make_report() -> dict:
@@ -39,6 +44,7 @@ def test_build_rows_classifies_exact_approximate_and_unavailable() -> None:
 
     assert by_metric["total_invocations"]["classification"] == "exact"
     assert by_metric["win_rate_pct"]["classification"] == "approximate"
+    assert by_metric["btc_benchmark_pnl_usd"]["classification"] == "unavailable"
     assert by_metric["reported_alpha_usd"]["classification"] == "unavailable"
 
 
@@ -51,15 +57,76 @@ def test_read_trade_metrics_counts_assets_and_notional(tmp_path) -> None:
     assert metrics == {"unique_traded_assets": 2, "total_notional_usd": 175.5}
 
 
+def test_btc_price_only_benchmark_is_computed_from_ohlcv(tmp_path) -> None:
+    ohlcv = tmp_path / "ohlcv_used.csv"
+    ohlcv.write_text(
+        "timestamp,asset,close\n"
+        "2026-04-06T00:00:00Z,BTC,100\n"
+        "2026-04-06T00:00:00Z,ETH,20\n"
+        "2026-04-11T23:59:00Z,BTC,90\n",
+        encoding="utf-8",
+    )
+
+    metrics = read_btc_benchmark_metrics(
+        ohlcv,
+        total_notional_usd=1000.0,
+        replication_net_pnl_usd=-10.0,
+    )
+
+    assert metrics["status"] == "available"
+    assert metrics["btc_price_return_pct"] == -10.0
+    assert metrics["btc_benchmark_pnl_usd"] == -100.0
+    assert metrics["reported_alpha_usd"] == 90.0
+
+    rows = build_rows(
+        make_report(),
+        {"unique_traded_assets": 2, "total_notional_usd": 1000.0},
+        metrics,
+    )
+    by_metric = {row["metric"]: row for row in rows}
+    assert by_metric["btc_benchmark_pnl_usd"]["replication"] == -100.0
+    assert by_metric["reported_alpha_usd"]["replication"] == 90.0
+
+
+def test_btc_benchmark_records_clear_unavailable_reason(tmp_path) -> None:
+    metrics = read_btc_benchmark_metrics(
+        tmp_path / "missing.csv",
+        total_notional_usd=1000.0,
+        replication_net_pnl_usd=-10.0,
+    )
+
+    assert metrics["status"] == "unavailable"
+    assert "does not exist" in metrics["reason"]
+    assert metrics["btc_benchmark_pnl_usd"] is None
+    assert metrics["reported_alpha_usd"] is None
+
+
 def test_write_markdown_gap_report_includes_limitations(tmp_path) -> None:
     out = tmp_path / "gap.md"
-    rows = build_rows(make_report(), {"unique_traded_assets": 76, "total_notional_usd": 26079.0})
+    benchmark = {
+        "status": "available",
+        "reason": "fixture",
+        "btc_start_close": 100.0,
+        "btc_end_close": 90.0,
+        "btc_price_return_pct": -10.0,
+        "total_notional_usd": 1000.0,
+        "btc_benchmark_pnl_usd": -100.0,
+        "reported_alpha_usd": 90.0,
+    }
+    rows = build_rows(
+        make_report(),
+        {"unique_traded_assets": 76, "total_notional_usd": 26079.0},
+        benchmark,
+    )
 
-    write_markdown(rows, make_report(), "summary.json", "trades.csv", out)
+    write_markdown(rows, make_report(), "summary.json", "trades.csv", out, benchmark)
 
     content = out.read_text(encoding="utf-8")
     assert "# AGENTICAITA Paper Replication Gap Report" in content
     assert "Paper Baseline Comparison" in content
+    assert "BTC Price-Only Benchmark" in content
+    assert "BTC price-only benchmark PnL USD" in content
+    assert "funding-adjusted perpetual-futures benchmark" in content
     assert "original L2 order book snapshots" in content
     assert "BTC benchmark alpha USD" in content
 

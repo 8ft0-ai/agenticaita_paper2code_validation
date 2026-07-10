@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             args.python, "scripts/compare_replication_to_paper.py",
             "--summary", str(replication_out / "summary.json"),
             "--trades", str(replication_out / "trades.csv"),
+            "--ohlcv", str(replication_out / "ohlcv_used.csv"),
             "--out", str(paper_comparison_out),
         ]
 
