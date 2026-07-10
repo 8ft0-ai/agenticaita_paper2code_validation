@@ -16,6 +16,17 @@ Submit exactly one envelope file to the existing `patch-submissions` branch:
 
 The broker creates the implementation branch and pull request.
 
+Validate the exact patch extracted from a patch-submission envelope before pushing:
+
+```bash
+python scripts/validate_patch_submission_envelope.py \
+  .patches/inbox/<submission-id>.patch-submission \
+  --repo-root . \
+  --base-ref origin/main
+```
+
+This catches envelope formatting and extraction issues that a standalone `git apply --check patch.diff` can miss.
+
 ## Preferred validation commands
 
 Install dependencies when needed:
