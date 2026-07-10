@@ -1,0 +1,101 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": 2,
+  "issue_number": 121,
+  "base_ref": "main",
+  "implementation_branch": "issue-121-deterministic-signal-mix-investigation",
+  "commit_message": "Document deterministic signal-mix divergence",
+  "pr_title": "Document deterministic signal-mix investigation",
+  "pr_body": "Closes #121\n\nExplains why the sign-based deterministic proxy should not be altered to imitate the paper's LLM-specific long bias, records the options considered, and directs behavioural comparison to the LLM-backed replication path.",
+  "validation": [
+    "git diff --check",
+    "git apply --check against main d6db45d6785c2c8dade086f9f8e73103fa682f4c",
+    "documentation-only investigation; deterministic signal logic intentionally unchanged"
+  ]
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/deterministic_signal_mix_investigation.md b/docs/deterministic_signal_mix_investigation.md
+new file mode 100644
+index 0000000..49aa2f9
+--- /dev/null
++++ b/docs/deterministic_signal_mix_investigation.md
+@@ -0,0 +1,78 @@
++# Deterministic signal-mix investigation
++
++## Decision
++
++Do not change the default deterministic Analyst solely to reproduce the paper's 142 long, 2 short, and 13 wait signals.
++
++The observed difference is explained by the distinction between the paper's LLM-backed Analyst and the repository's deliberately transparent deterministic surrogate. There is no paper-grounded deterministic rule that would justify imposing the reported long bias on the proxy.
++
++## Paper behaviour
++
++The paper reports 157 Analyst decisions:
++
++| Signal | Count | Share |
++| --- | ---: | ---: |
++| Long | 142 | 90.4% |
++| Short | 2 | 1.3% |
++| Wait | 13 | 8.3% |
++
++The paper later identifies this as a limitation: a systematic long-directional bias in LLM-generated financial reasoning. It attributes the pattern to the Analyst favouring trend-continuation hypotheses and proposes a future Skeptic Agent to challenge that bias.
++
++The reported distribution is therefore an empirical property of one model, prompt, context stream, and five-day market session. It is not presented as a required architectural invariant or a deterministic trading rule.
++
++## Current deterministic proxy
++
++The repository's `RuleBasedAnalyst` is intentionally simple and auditable:
++
++```python
++signal = "long" if event.signed_return > 0 else "short"
++```
++
++Confidence is computed from anomaly strength and the CBD score. A decision becomes `wait` only when that confidence is below the proxy threshold.
++
++Consequences:
++
++- positive trigger returns produce long signals;
++- negative trigger returns produce short signals;
++- the long/short mix follows the sign distribution of admitted market events;
++- the wait rate follows the confidence formula and threshold;
++- no LLM optimism, narrative trend preference, order-book interpretation, or prompt bias is represented.
++
++A roughly balanced deterministic long/short mix is therefore expected when admitted positive and negative return events are roughly balanced. It is not evidence that the trigger, CBD calculation, or pipeline wiring is incorrect.
++
++## Options considered
++
++### Add a fixed long prior
++
++A hard-coded long preference could move the aggregate distribution towards the paper, but the paper does not disclose a deterministic prior or probability that could justify such a change. It would amount to target matching rather than replication of a published mechanism.
++
++**Decision:** reject.
++
++### Tune direction rules against PnL or the reported counts
++
++Changing thresholds or rules until the output reaches approximately 142 long and 2 short would couple implementation choices to the target result. It would also risk disguising venue, market-window, and model differences as implementation fidelity.
++
++**Decision:** reject.
++
++### Model the paper's observed LLM bias as an optional experiment
++
++An explicitly labelled experimental policy could apply a configurable directional prior for sensitivity analysis. Such a mode would need separate reporting and must not replace the neutral deterministic default.
++
++**Decision:** defer unless a specific bias-ablation experiment is requested.
++
++### Use the LLM-backed Analyst
++
++The repository already supports an LLM-backed Analyst and Risk Manager. That path is the appropriate way to investigate whether a language model, prompt, and market context reproduce a long-biased distribution. Provider and model differences still prevent a claim of exact reproduction unless the original Qwen model path, prompts, context, and outputs are available.
++
++**Decision:** track under the LLM-backed replication issue.
++
++## Replication interpretation
++
++The deterministic signal-mix gap should be reported as an expected behavioural divergence:
++
++- **paper:** empirical output from an LLM-backed Analyst;
++- **deterministic replication:** sign-based control surrogate for architecture testing;
++- **cause:** different decision mechanism, plus venue and session differences;
++- **appropriate conclusion:** functional architecture replication, not reproduction of the original Analyst decisions.
++
++No code change is warranted for the default deterministic Analyst. Tests remain valid because its documented rule has not changed.
