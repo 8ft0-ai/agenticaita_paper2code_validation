@@ -37,7 +37,7 @@ When replication is enabled, the workflow also writes a paper comparison report 
 paper_replication_gap_report.md
 ```
 
-The gap report compares the run's `summary.json` and `trades.csv` against the paper's reported aggregates, including invocations, Analyst and Risk Manager counts, trades, unique traded assets, wins/losses, PnL, win rate, profit factor, notional, and benchmark-alpha availability. Each metric is classified as `exact`, `approximate`, `divergent`, or `unavailable`. The report explicitly caveats that public APIs cannot recover the paper's original L2 snapshots, prompts, LLM outputs, Risk Manager decisions, SQLite logs, or configuration history.
+The gap report compares the run's `summary.json`, `trades.csv`, and `ohlcv_used.csv` against the paper's reported aggregates, including invocations, Analyst and Risk Manager counts, trades, unique traded assets, wins/losses, PnL, win rate, profit factor, notional, BTC benchmark PnL, and benchmark alpha. The BTC comparison applies the first-to-last BTC price return to replication total notional and subtracts that benchmark PnL from replication net PnL. It is explicitly price-only arithmetic, not a reproduction of the paper's funding-adjusted perpetual-futures benchmark. Each metric is classified as `exact`, `approximate`, `divergent`, or `unavailable`. The report also caveats that public APIs cannot recover the paper's original L2 snapshots, prompts, LLM outputs, Risk Manager decisions, SQLite logs, or configuration history.
 
 Use `--paper-comparison-out` to choose a different report path, or `--skip-paper-comparison` when only the raw replication artefacts are needed.
 
