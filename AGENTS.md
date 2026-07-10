@@ -95,6 +95,18 @@ Replication with real data (requires exported CSV):
 python replication/replicate.py --config replication/config.yaml --input-csv <path> --out <dir>
 ```
 
+LLM live smoke path (uses OpenRouter when `OPENROUTER_API_KEY` is set; otherwise exercises the deterministic fallback path and writes a skip/fallback reason):
+```bash
+cd replication && python llm_live_smoke.py --out results_llm_live_smoke
+```
+
+Strict CI-style skip when no live key is available:
+```bash
+cd replication && python llm_live_smoke.py --out results_llm_live_smoke --skip-without-key
+```
+
+Smoke outputs are written under `results_llm_live_smoke/`, including `pipeline_log.csv`, `llm_audit.jsonl`, and `smoke_status.json`.
+
 Full automated real-data pipeline:
 ```bash
 python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm --timeframe 1m --start 2026-04-06T00:00:00Z --end 2026-04-11T23:59:59Z --config replication/config.yaml
