@@ -1,0 +1,8 @@
+{
+  "implementation_branch": "feature/109-llm-live-smoke-path",
+  "issue_number": 109,
+  "pull_request_url": "https://github.com/8ft0-ai/agenticaita_paper2code_validation/pull/115",
+  "status": "processed",
+  "submission_id": "issue-109-llm-live-smoke",
+  "workflow_run_url": "https://github.com/8ft0-ai/agenticaita_paper2code_validation/actions/runs/29069688782"
+}

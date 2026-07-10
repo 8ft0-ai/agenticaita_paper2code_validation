@@ -1,0 +1,15 @@
+{
+  "base_ref": "main",
+  "base_sha": "2090a2248d129ad78ec40a2e1cb35a938596e776",
+  "commit_message": "Add live LLM smoke path",
+  "implementation_branch": "feature/109-llm-live-smoke-path",
+  "issue_number": 109,
+  "pr_body": "Closes #109\n\n## Summary\n- Add a tiny LLM live-smoke script that runs `replicate.py --agents llm` on a five-row input.\n- Detect the configured OpenRouter API key, use deterministic fallback when absent, and support strict skip mode for CI.\n- Write auditable smoke outputs including `pipeline_log.csv`, `llm_audit.jsonl`, and `smoke_status.json`.\n- Document the invocation in `AGENTS.md`.\n\n## Validation\n- `python -m py_compile replication/llm_live_smoke.py replication/tests/test_llm_live_smoke.py`\n- `git apply --check issue109.patch`\n- `python /mnt/data/validate_patch_submission_envelope.py .patches/inbox/issue-109-llm-live-smoke.patch-submission --repo-root . --base-ref HEAD`",
+  "pr_title": "Add live LLM smoke path",
+  "schema_version": 2,
+  "validation": [
+    "python -m py_compile replication/llm_live_smoke.py replication/tests/test_llm_live_smoke.py",
+    "git apply --check issue109.patch",
+    "python /mnt/data/validate_patch_submission_envelope.py .patches/inbox/issue-109-llm-live-smoke.patch-submission --repo-root . --base-ref HEAD"
+  ]
+}
