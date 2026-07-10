@@ -2,11 +2,12 @@
 
 This runbook documents the single scripted entry point for the public-market AGENTICAITA replication workflow.
 
-The script runs three existing repository stages:
+The script runs four existing repository stages:
 
 1. fetch public one-minute OHLCV and available funding history with `scripts/fetch_hyperliquid_ohlcv.py`;
 2. export complete SQLite candle coverage to replication input CSV with `scripts/export_replication_input.py`;
-3. run the functional replication harness with `replication/replicate.py` and `replication/config.yaml`.
+3. run the functional replication harness with `replication/replicate.py` and `replication/config.yaml`;
+4. compare the replication summary against the paper's reported aggregate baseline with `scripts/compare_replication_to_paper.py`.
 
 Generated market data, exported CSVs, replication outputs, SQLite databases, and coverage reports remain local artefacts under the repository artifact-retention policy.
 
@@ -29,6 +30,16 @@ python scripts/run_real_data_replication.py --profile baseline-15 --exchange bin
 ```
 
 The profile maps the baseline assets to the selected exchange quote convention. For Binance USD-M it requests symbols such as `BTC/USDT:USDT`; for Hyperliquid it requests `BTC/USDC:USDC`.
+
+When replication is enabled, the workflow also writes a paper comparison report under the replication output directory:
+
+```text
+paper_replication_gap_report.md
+```
+
+The gap report compares the run's `summary.json` and `trades.csv` against the paper's reported aggregates, including invocations, Analyst and Risk Manager counts, trades, unique traded assets, wins/losses, PnL, win rate, profit factor, notional, and benchmark-alpha availability. Each metric is classified as `exact`, `approximate`, `divergent`, or `unavailable`. The report explicitly caveats that public APIs cannot recover the paper's original L2 snapshots, prompts, LLM outputs, Risk Manager decisions, SQLite logs, or configuration history.
+
+Use `--paper-comparison-out` to choose a different report path, or `--skip-paper-comparison` when only the raw replication artefacts are needed.
 
 ## Larger universe workflow
 
