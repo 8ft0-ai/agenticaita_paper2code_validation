@@ -44,3 +44,42 @@ def test_real_data_workflow_exports_input_from_existing_sqlite(tmp_path: Path) -
     assert rows[0]["asset"] == "BTC"
     assert rows[0]["source_symbol"] == "BTC/USDT:USDT"
     assert {"open", "high", "low", "close", "volume"}.issubset(rows[0])
+
+
+def test_real_data_workflow_dry_run_includes_paper_comparison(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    db = tmp_path / "market_data.sqlite"
+    replication_input = tmp_path / "replication_input_ohlcv.csv"
+    symbols = tmp_path / "symbols.txt"
+    replication_out = tmp_path / "replication_results"
+    paper_comparison = tmp_path / "paper_gap.md"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_real_data_replication.py",
+            "--skip-fetch",
+            "--dry-run",
+            "--exchange",
+            "binanceusdm",
+            "--market-db",
+            str(db),
+            "--replication-input",
+            str(replication_input),
+            "--symbols-out",
+            str(symbols),
+            "--replication-out",
+            str(replication_out),
+            "--paper-comparison-out",
+            str(paper_comparison),
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "scripts/compare_replication_to_paper.py" in result.stdout
+    assert str(replication_out / "summary.json") in result.stdout
+    assert str(replication_out / "trades.csv") in result.stdout
+    assert str(paper_comparison) in result.stdout

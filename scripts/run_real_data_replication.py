@@ -52,6 +52,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--replication-input", default=None)
     p.add_argument("--symbols-out", default=None)
     p.add_argument("--replication-out", default=None)
+    p.add_argument("--paper-comparison-out", default=None)
+    p.add_argument("--skip-paper-comparison", action="store_true")
     p.add_argument("--config", default="replication/config.yaml")
     p.add_argument("--export-format", choices=("close", "ohlcv"), default="ohlcv")
     p.add_argument("--include-funding", action="store_true")
@@ -78,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     replication_input = Path(args.replication_input or market_out / "replication_input_ohlcv.csv")
     symbols_out = Path(args.symbols_out or market_out / f"complete_symbols_{limit}.txt")
     replication_out = Path(args.replication_out or root / "replication" / f"results_real_{args.exchange}_{scope}")
+    paper_comparison_out = Path(args.paper_comparison_out or replication_out / "paper_replication_gap_report.md")
     symbols = args.symbols or (baseline_symbols(args.exchange) if args.profile == "baseline-15" else None)
 
     fetch_cmd = None
@@ -109,14 +112,24 @@ def main(argv: list[str] | None = None) -> int:
     replicate_cmd = None
     if not args.skip_replication:
         replicate_cmd = [args.python, "replication/replicate.py", "--config", args.config, "--input-csv", str(replication_input), "--out", str(replication_out)]
+    paper_compare_cmd = None
+    if not args.skip_replication and not args.skip_paper_comparison:
+        paper_compare_cmd = [
+            args.python, "scripts/compare_replication_to_paper.py",
+            "--summary", str(replication_out / "summary.json"),
+            "--trades", str(replication_out / "trades.csv"),
+            "--out", str(paper_comparison_out),
+        ]
 
-    plan = {"profile": args.profile, "exchange": args.exchange, "paths": {"market_db": str(market_db), "replication_input": str(replication_input), "replication_out": str(replication_out)}, "commands": {"fetch": fetch_cmd, "export": export_cmd, "replicate": replicate_cmd}}
+    plan = {"profile": args.profile, "exchange": args.exchange, "paths": {"market_db": str(market_db), "replication_input": str(replication_input), "replication_out": str(replication_out), "paper_comparison_out": str(paper_comparison_out)}, "commands": {"fetch": fetch_cmd, "export": export_cmd, "replicate": replicate_cmd, "paper_compare": paper_compare_cmd}}
     print(json.dumps(plan, indent=2), flush=True)
     if fetch_cmd:
         run(fetch_cmd, cwd=root, dry_run=args.dry_run)
     run(export_cmd, cwd=root, dry_run=args.dry_run)
     if replicate_cmd:
         run(replicate_cmd, cwd=root, dry_run=args.dry_run)
+    if paper_compare_cmd:
+        run(paper_compare_cmd, cwd=root, dry_run=args.dry_run)
     return 0
 
 
