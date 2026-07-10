@@ -1,0 +1,405 @@
+PATCH_SUBMISSION_SCHEMA_VERSION: 2
+--- PATCH_SUBMISSION_MANIFEST_JSON ---
+{
+  "schema_version": 2,
+  "issue_number": 119,
+  "base_ref": "main",
+  "implementation_branch": "issue-119-btc-benchmark-alpha",
+  "commit_message": "Compute BTC benchmark alpha in replication reports",
+  "pr_title": "Compute BTC benchmark alpha in replication reports",
+  "pr_body": "Closes #119\n\nComputes a price-only BTC buy-and-hold benchmark from replication OHLCV artefacts, reports benchmark PnL and replication alpha, and preserves an explicit distinction from the paper's funding-adjusted benchmark.",
+  "validation": [
+    "git diff --check",
+    "git apply --check against reconstructed files from main c8575c3f6ec6b468956c7a9b95cc4177ff77d4fa",
+    "python -m pytest tests/test_compare_replication_to_paper.py -q (6 passed)",
+    "python -m pytest replication/tests/test_real_data_workflow.py::test_real_data_workflow_dry_run_includes_paper_comparison -q (1 passed)",
+    "manual CLI fixture verified BTC benchmark PnL and alpha output"
+  ]
+}
+--- PATCH_SUBMISSION_UNIFIED_DIFF ---
+diff --git a/docs/real_data_replication_workflow.md b/docs/real_data_replication_workflow.md
+index 73a6078..bdbd6fd 100644
+--- a/docs/real_data_replication_workflow.md
++++ b/docs/real_data_replication_workflow.md
+@@ -37,7 +37,7 @@ When replication is enabled, the workflow also writes a paper comparison report
+ paper_replication_gap_report.md
+ ```
+ 
+-The gap report compares the run's `summary.json` and `trades.csv` against the paper's reported aggregates, including invocations, Analyst and Risk Manager counts, trades, unique traded assets, wins/losses, PnL, win rate, profit factor, notional, and benchmark-alpha availability. Each metric is classified as `exact`, `approximate`, `divergent`, or `unavailable`. The report explicitly caveats that public APIs cannot recover the paper's original L2 snapshots, prompts, LLM outputs, Risk Manager decisions, SQLite logs, or configuration history.
++The gap report compares the run's `summary.json`, `trades.csv`, and `ohlcv_used.csv` against the paper's reported aggregates, including invocations, Analyst and Risk Manager counts, trades, unique traded assets, wins/losses, PnL, win rate, profit factor, notional, BTC benchmark PnL, and benchmark alpha. The BTC comparison applies the first-to-last BTC price return to replication total notional and subtracts that benchmark PnL from replication net PnL. It is explicitly price-only arithmetic, not a reproduction of the paper's funding-adjusted perpetual-futures benchmark. Each metric is classified as `exact`, `approximate`, `divergent`, or `unavailable`. The report also caveats that public APIs cannot recover the paper's original L2 snapshots, prompts, LLM outputs, Risk Manager decisions, SQLite logs, or configuration history.
+ 
+ Use `--paper-comparison-out` to choose a different report path, or `--skip-paper-comparison` when only the raw replication artefacts are needed.
+ 
+diff --git a/replication/tests/test_real_data_workflow.py b/replication/tests/test_real_data_workflow.py
+index 7009806..88413f7 100644
+--- a/replication/tests/test_real_data_workflow.py
++++ b/replication/tests/test_real_data_workflow.py
+@@ -82,4 +82,5 @@ def test_real_data_workflow_dry_run_includes_paper_comparison(tmp_path: Path) ->
+     assert "scripts/compare_replication_to_paper.py" in result.stdout
+     assert str(replication_out / "summary.json") in result.stdout
+     assert str(replication_out / "trades.csv") in result.stdout
++    assert str(replication_out / "ohlcv_used.csv") in result.stdout
+     assert str(paper_comparison) in result.stdout
+diff --git a/scripts/compare_replication_to_paper.py b/scripts/compare_replication_to_paper.py
+index f988f08..77b1004 100644
+--- a/scripts/compare_replication_to_paper.py
++++ b/scripts/compare_replication_to_paper.py
+@@ -27,6 +27,7 @@ PAPER_BASELINE: dict[str, Any] = {
+     "win_rate_pct": 51.80,
+     "profit_factor": 0.841,
+     "agentic_friction_pct": 11.5,
++    "btc_benchmark_pnl_usd": -3912.0,
+     "reported_alpha_usd": 3896.0,
+ }
+ 
+@@ -49,6 +50,7 @@ METRIC_LABELS = {
+     "win_rate_pct": "Win rate percent",
+     "profit_factor": "Profit factor",
+     "agentic_friction_pct": "Agentic friction percent",
++    "btc_benchmark_pnl_usd": "BTC price-only benchmark PnL USD",
+     "reported_alpha_usd": "BTC benchmark alpha USD",
+ }
+ 
+@@ -79,12 +81,106 @@ def read_trade_metrics(path: str | Path | None) -> dict[str, Any]:
+     return {"unique_traded_assets": len(assets), "total_notional_usd": total_notional}
+ 
+ 
+-def replication_values(report: dict[str, Any], trade_metrics: dict[str, Any] | None = None) -> dict[str, Any]:
++def _is_btc_row(row: dict[str, str]) -> bool:
++    asset = str(row.get("asset") or "").strip().upper()
++    source_symbol = str(row.get("source_symbol") or row.get("symbol") or "").strip().upper()
++    return asset == "BTC" or asset.startswith("BTC/") or source_symbol.startswith("BTC/")
++
++
++def _timestamp_sort_key(value: str, row_number: int) -> tuple[int, float | str, int]:
++    raw = value.strip()
++    try:
++        return 0, float(raw), row_number
++    except ValueError:
++        return 1, raw, row_number
++
++
++def read_btc_benchmark_metrics(
++    path: str | Path | None,
++    *,
++    total_notional_usd: float | None,
++    replication_net_pnl_usd: float | None,
++) -> dict[str, Any]:
++    metrics: dict[str, Any] = {
++        "status": "unavailable",
++        "reason": "OHLCV artefact was not supplied.",
++        "btc_benchmark_pnl_usd": None,
++        "reported_alpha_usd": None,
++    }
++    if path is None:
++        return metrics
++
++    ohlcv_path = Path(path)
++    metrics["ohlcv_path"] = str(ohlcv_path)
++    if not ohlcv_path.exists():
++        metrics["reason"] = f"OHLCV artefact does not exist: {ohlcv_path}"
++        return metrics
++    if total_notional_usd is None or total_notional_usd <= 0:
++        metrics["reason"] = "Replication total notional is unavailable or zero."
++        return metrics
++    if replication_net_pnl_usd is None:
++        metrics["reason"] = "Replication net PnL is unavailable."
++        return metrics
++
++    btc_prices: list[tuple[tuple[int, float | str, int], float]] = []
++    with ohlcv_path.open(newline="", encoding="utf-8") as handle:
++        for row_number, row in enumerate(csv.DictReader(handle)):
++            if not _is_btc_row(row):
++                continue
++            try:
++                close = float(row.get("close") or "")
++            except ValueError:
++                continue
++            if close <= 0:
++                continue
++            timestamp = str(row.get("timestamp") or row.get("timestamp_ms") or row_number)
++            btc_prices.append((_timestamp_sort_key(timestamp, row_number), close))
++
++    if len(btc_prices) < 2:
++        metrics["reason"] = "Fewer than two valid BTC close observations were found in the OHLCV artefact."
++        return metrics
++
++    btc_prices.sort(key=lambda item: item[0])
++    start_close = btc_prices[0][1]
++    end_close = btc_prices[-1][1]
++    price_return = (end_close / start_close) - 1.0
++    benchmark_pnl = float(total_notional_usd) * price_return
++    alpha = float(replication_net_pnl_usd) - benchmark_pnl
++
++    metrics.update(
++        {
++            "status": "available",
++            "reason": "Computed from the first and last BTC close in the supplied OHLCV artefact.",
++            "btc_start_close": start_close,
++            "btc_end_close": end_close,
++            "btc_price_return_pct": round(price_return * 100.0, 8),
++            "total_notional_usd": float(total_notional_usd),
++            "replication_net_pnl_usd": float(replication_net_pnl_usd),
++            "btc_benchmark_pnl_usd": round(benchmark_pnl, 2),
++            "reported_alpha_usd": round(alpha, 2),
++        }
++    )
++    return metrics
++
++
++def replication_values(
++    report: dict[str, Any],
++    trade_metrics: dict[str, Any] | None = None,
++    benchmark_metrics: dict[str, Any] | None = None,
++) -> dict[str, Any]:
+     trade_metrics = trade_metrics or {}
++    benchmark_metrics = benchmark_metrics or {}
+     summary = report.get("summary", {})
+     values = {metric: summary.get(metric) for metric in PAPER_BASELINE}
+-    values.update({key: trade_metrics.get(key) for key in ("unique_traded_assets", "total_notional_usd") if key in trade_metrics})
+-    values["reported_alpha_usd"] = None
++    values.update(
++        {
++            key: trade_metrics.get(key)
++            for key in ("unique_traded_assets", "total_notional_usd")
++            if key in trade_metrics
++        }
++    )
++    values["btc_benchmark_pnl_usd"] = benchmark_metrics.get("btc_benchmark_pnl_usd")
++    values["reported_alpha_usd"] = benchmark_metrics.get("reported_alpha_usd")
+     return values
+ 
+ 
+@@ -100,8 +196,12 @@ def classify(metric: str, paper_value: Any, replicated_value: Any) -> str:
+     return "divergent"
+ 
+ 
+-def build_rows(report: dict[str, Any], trade_metrics: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+-    replicated = replication_values(report, trade_metrics)
++def build_rows(
++    report: dict[str, Any],
++    trade_metrics: dict[str, Any] | None = None,
++    benchmark_metrics: dict[str, Any] | None = None,
++) -> list[dict[str, Any]]:
++    replicated = replication_values(report, trade_metrics, benchmark_metrics)
+     rows = []
+     for metric, paper_value in PAPER_BASELINE.items():
+         replication_value = replicated.get(metric)
+@@ -149,7 +249,47 @@ def run_context(report: dict[str, Any]) -> dict[str, Any]:
+     }
+ 
+ 
+-def write_markdown(rows: list[dict[str, Any]], report: dict[str, Any], summary_path: str, trades_path: str | None, out_path: str | Path) -> None:
++def benchmark_markdown(benchmark_metrics: dict[str, Any] | None) -> list[str]:
++    benchmark_metrics = benchmark_metrics or {
++        "status": "unavailable",
++        "reason": "BTC benchmark calculation was not requested.",
++    }
++    lines = [
++        "## BTC Price-Only Benchmark",
++        "",
++        f"Status: `{benchmark_metrics.get('status', 'unavailable')}`",
++        "",
++        str(benchmark_metrics.get("reason", "No availability reason was recorded.")),
++    ]
++    if benchmark_metrics.get("status") == "available":
++        lines.extend(
++            [
++                "",
++                f"- BTC start close: `{benchmark_metrics['btc_start_close']}`",
++                f"- BTC end close: `{benchmark_metrics['btc_end_close']}`",
++                f"- BTC price return: `{benchmark_metrics['btc_price_return_pct']:.6f}%`",
++                f"- Replication total notional: `${benchmark_metrics['total_notional_usd']:.2f}`",
++                f"- BTC benchmark PnL: `${benchmark_metrics['btc_benchmark_pnl_usd']:.2f}`",
++                f"- Replication alpha versus BTC: `${benchmark_metrics['reported_alpha_usd']:.2f}`",
++            ]
++        )
++    lines.extend(
++        [
++            "",
++            "This is price-only benchmark arithmetic. It does not reproduce the paper's funding-adjusted perpetual-futures benchmark because funding cash flows and the original sizing history are unavailable.",
++        ]
++    )
++    return lines
++
++
++def write_markdown(
++    rows: list[dict[str, Any]],
++    report: dict[str, Any],
++    summary_path: str,
++    trades_path: str | None,
++    out_path: str | Path,
++    benchmark_metrics: dict[str, Any] | None = None,
++) -> None:
+     counts: dict[str, int] = {}
+     for row in rows:
+         counts[row["classification"]] = counts.get(row["classification"], 0) + 1
+@@ -177,6 +317,12 @@ def write_markdown(rows: list[dict[str, Any]], report: dict[str, Any], summary_p
+             json.dumps(run_context(report), indent=2),
+             "```",
+             "",
++        ]
++    )
++    lines.extend(benchmark_markdown(benchmark_metrics))
++    lines.extend(
++        [
++            "",
+             "## Paper Baseline Comparison",
+             "",
+             markdown_table(rows),
+@@ -186,7 +332,7 @@ def write_markdown(rows: list[dict[str, Any]], report: dict[str, Any], summary_p
+             "- `exact`: replication value equals the paper aggregate exactly.",
+             "- `approximate`: replication value is within a deliberately broad structural-comparison tolerance for rate-like metrics.",
+             "- `divergent`: replication value is available but differs outside the comparison tolerance.",
+-            "- `unavailable`: the replication summary does not contain enough information to compute the comparison.",
++            "- `unavailable`: the replication artefacts do not contain enough information to compute the comparison.",
+             "",
+             "## Non-Recoverable Original Artefacts",
+             "",
+@@ -202,6 +348,11 @@ def build_parser() -> argparse.ArgumentParser:
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--summary", required=True, help="replication summary.json")
+     parser.add_argument("--trades", default=None, help="optional replication trades.csv for unique traded assets and notional")
++    parser.add_argument(
++        "--ohlcv",
++        default=None,
++        help="optional OHLCV CSV for the BTC price-only benchmark; defaults to ohlcv_used.csv beside summary.json",
++    )
+     parser.add_argument("--out", required=True, help="output Markdown gap report path")
+     return parser
+ 
+@@ -210,8 +361,15 @@ def main() -> None:
+     args = build_parser().parse_args()
+     report = load_summary(args.summary)
+     trade_metrics = read_trade_metrics(args.trades)
+-    rows = build_rows(report, trade_metrics)
+-    write_markdown(rows, report, args.summary, args.trades, args.out)
++    summary = report.get("summary", {})
++    ohlcv_path = Path(args.ohlcv) if args.ohlcv else Path(args.summary).with_name("ohlcv_used.csv")
++    benchmark_metrics = read_btc_benchmark_metrics(
++        ohlcv_path,
++        total_notional_usd=trade_metrics.get("total_notional_usd"),
++        replication_net_pnl_usd=summary.get("net_pnl_usd"),
++    )
++    rows = build_rows(report, trade_metrics, benchmark_metrics)
++    write_markdown(rows, report, args.summary, args.trades, args.out, benchmark_metrics)
+     print(f"wrote paper replication gap report to {args.out}")
+ 
+ 
+diff --git a/scripts/run_real_data_replication.py b/scripts/run_real_data_replication.py
+index 15baf85..73fb90c 100644
+--- a/scripts/run_real_data_replication.py
++++ b/scripts/run_real_data_replication.py
+@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
+             args.python, "scripts/compare_replication_to_paper.py",
+             "--summary", str(replication_out / "summary.json"),
+             "--trades", str(replication_out / "trades.csv"),
++            "--ohlcv", str(replication_out / "ohlcv_used.csv"),
+             "--out", str(paper_comparison_out),
+         ]
+ 
+diff --git a/tests/test_compare_replication_to_paper.py b/tests/test_compare_replication_to_paper.py
+index 69c9c32..6ff75be 100644
+--- a/tests/test_compare_replication_to_paper.py
++++ b/tests/test_compare_replication_to_paper.py
+@@ -2,7 +2,12 @@ from __future__ import annotations
+ 
+ import json
+ 
+-from scripts.compare_replication_to_paper import build_rows, read_trade_metrics, write_markdown
++from scripts.compare_replication_to_paper import (
++    build_rows,
++    read_btc_benchmark_metrics,
++    read_trade_metrics,
++    write_markdown,
++)
+ 
+ 
+ def make_report() -> dict:
+@@ -39,6 +44,7 @@ def test_build_rows_classifies_exact_approximate_and_unavailable() -> None:
+ 
+     assert by_metric["total_invocations"]["classification"] == "exact"
+     assert by_metric["win_rate_pct"]["classification"] == "approximate"
++    assert by_metric["btc_benchmark_pnl_usd"]["classification"] == "unavailable"
+     assert by_metric["reported_alpha_usd"]["classification"] == "unavailable"
+ 
+ 
+@@ -51,15 +57,76 @@ def test_read_trade_metrics_counts_assets_and_notional(tmp_path) -> None:
+     assert metrics == {"unique_traded_assets": 2, "total_notional_usd": 175.5}
+ 
+ 
++def test_btc_price_only_benchmark_is_computed_from_ohlcv(tmp_path) -> None:
++    ohlcv = tmp_path / "ohlcv_used.csv"
++    ohlcv.write_text(
++        "timestamp,asset,close\n"
++        "2026-04-06T00:00:00Z,BTC,100\n"
++        "2026-04-06T00:00:00Z,ETH,20\n"
++        "2026-04-11T23:59:00Z,BTC,90\n",
++        encoding="utf-8",
++    )
++
++    metrics = read_btc_benchmark_metrics(
++        ohlcv,
++        total_notional_usd=1000.0,
++        replication_net_pnl_usd=-10.0,
++    )
++
++    assert metrics["status"] == "available"
++    assert metrics["btc_price_return_pct"] == -10.0
++    assert metrics["btc_benchmark_pnl_usd"] == -100.0
++    assert metrics["reported_alpha_usd"] == 90.0
++
++    rows = build_rows(
++        make_report(),
++        {"unique_traded_assets": 2, "total_notional_usd": 1000.0},
++        metrics,
++    )
++    by_metric = {row["metric"]: row for row in rows}
++    assert by_metric["btc_benchmark_pnl_usd"]["replication"] == -100.0
++    assert by_metric["reported_alpha_usd"]["replication"] == 90.0
++
++
++def test_btc_benchmark_records_clear_unavailable_reason(tmp_path) -> None:
++    metrics = read_btc_benchmark_metrics(
++        tmp_path / "missing.csv",
++        total_notional_usd=1000.0,
++        replication_net_pnl_usd=-10.0,
++    )
++
++    assert metrics["status"] == "unavailable"
++    assert "does not exist" in metrics["reason"]
++    assert metrics["btc_benchmark_pnl_usd"] is None
++    assert metrics["reported_alpha_usd"] is None
++
++
+ def test_write_markdown_gap_report_includes_limitations(tmp_path) -> None:
+     out = tmp_path / "gap.md"
+-    rows = build_rows(make_report(), {"unique_traded_assets": 76, "total_notional_usd": 26079.0})
++    benchmark = {
++        "status": "available",
++        "reason": "fixture",
++        "btc_start_close": 100.0,
++        "btc_end_close": 90.0,
++        "btc_price_return_pct": -10.0,
++        "total_notional_usd": 1000.0,
++        "btc_benchmark_pnl_usd": -100.0,
++        "reported_alpha_usd": 90.0,
++    }
++    rows = build_rows(
++        make_report(),
++        {"unique_traded_assets": 76, "total_notional_usd": 26079.0},
++        benchmark,
++    )
+ 
+-    write_markdown(rows, make_report(), "summary.json", "trades.csv", out)
++    write_markdown(rows, make_report(), "summary.json", "trades.csv", out, benchmark)
+ 
+     content = out.read_text(encoding="utf-8")
+     assert "# AGENTICAITA Paper Replication Gap Report" in content
+     assert "Paper Baseline Comparison" in content
++    assert "BTC Price-Only Benchmark" in content
++    assert "BTC price-only benchmark PnL USD" in content
++    assert "funding-adjusted perpetual-futures benchmark" in content
+     assert "original L2 order book snapshots" in content
+     assert "BTC benchmark alpha USD" in content
+ 
