@@ -1,0 +1,24 @@
+{
+  "base_ref": "main",
+  "base_sha": "aaa5ba157a7d31bd380997cd82d480d2de1fb692",
+  "commit_message": "add paper replication gap report",
+  "implementation_branch": "issue-117-paper-gap-report",
+  "issue_number": 117,
+  "pr_title": "Add paper replication gap report",
+  "risks": [
+    "The report is a functional gap analysis, not evidence of exact historical replication without original author artefacts.",
+    "Paper BTC alpha remains unavailable from replication summary until benchmark accounting is extended."
+  ],
+  "schema_version": 2,
+  "summary": [
+    "Adds scripts/compare_replication_to_paper.py to compare functional replication outputs with AGENTICAITA paper aggregates.",
+    "Wires paper_replication_gap_report.md generation into scripts/run_real_data_replication.py.",
+    "Documents the new report and adds offline tests for comparison and workflow planning."
+  ],
+  "validation": [
+    "pytest tests/test_compare_replication_to_paper.py tests/test_compare_replication_runs.py replication/tests/test_real_data_workflow.py -q",
+    "pytest tests/ -q",
+    "python scripts/run_real_data_replication.py --skip-fetch --dry-run --paper-comparison-out /var/folders/62/dljfp8k905lffg_vdv3whlyw0000gn/T/opencode/paper_gap.md",
+    "python scripts/run_real_data_replication.py --skip-fetch --market-db data/binanceusdm_ohlcv_real_subset/market_data.sqlite --replication-input data/binanceusdm_ohlcv_real_subset/replication_input_ohlcv.csv --replication-out replication/results_real_binanceusdm_issue117 --paper-comparison-out replication/results_real_binanceusdm_issue117/paper_replication_gap_report.md"
+  ]
+}

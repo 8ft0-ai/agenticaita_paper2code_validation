@@ -1,0 +1,450 @@
+diff --git a/docs/real_data_replication_workflow.md b/docs/real_data_replication_workflow.md
+index b7cd17a..73a6078 100644
+--- a/docs/real_data_replication_workflow.md
++++ b/docs/real_data_replication_workflow.md
+@@ -2,11 +2,12 @@
+ 
+ This runbook documents the single scripted entry point for the public-market AGENTICAITA replication workflow.
+ 
+-The script runs three existing repository stages:
++The script runs four existing repository stages:
+ 
+ 1. fetch public one-minute OHLCV and available funding history with `scripts/fetch_hyperliquid_ohlcv.py`;
+ 2. export complete SQLite candle coverage to replication input CSV with `scripts/export_replication_input.py`;
+-3. run the functional replication harness with `replication/replicate.py` and `replication/config.yaml`.
++3. run the functional replication harness with `replication/replicate.py` and `replication/config.yaml`;
++4. compare the replication summary against the paper's reported aggregate baseline with `scripts/compare_replication_to_paper.py`.
+ 
+ Generated market data, exported CSVs, replication outputs, SQLite databases, and coverage reports remain local artefacts under the repository artifact-retention policy.
+ 
+@@ -30,6 +31,16 @@ python scripts/run_real_data_replication.py --profile baseline-15 --exchange bin
+ 
+ The profile maps the baseline assets to the selected exchange quote convention. For Binance USD-M it requests symbols such as `BTC/USDT:USDT`; for Hyperliquid it requests `BTC/USDC:USDC`.
+ 
++When replication is enabled, the workflow also writes a paper comparison report under the replication output directory:
++
++```text
++paper_replication_gap_report.md
++```
++
++The gap report compares the run's `summary.json` and `trades.csv` against the paper's reported aggregates, including invocations, Analyst and Risk Manager counts, trades, unique traded assets, wins/losses, PnL, win rate, profit factor, notional, and benchmark-alpha availability. Each metric is classified as `exact`, `approximate`, `divergent`, or `unavailable`. The report explicitly caveats that public APIs cannot recover the paper's original L2 snapshots, prompts, LLM outputs, Risk Manager decisions, SQLite logs, or configuration history.
++
++Use `--paper-comparison-out` to choose a different report path, or `--skip-paper-comparison` when only the raw replication artefacts are needed.
++
+ ## Larger universe workflow
+ 
+ Use the `large` profile when exploring a broader public-market universe. The export step selects only symbols with complete candle coverage for the requested window and prioritises BTC before applying the symbol limit.
+diff --git a/replication/tests/test_real_data_workflow.py b/replication/tests/test_real_data_workflow.py
+index b8352b0..7009806 100644
+--- a/replication/tests/test_real_data_workflow.py
++++ b/replication/tests/test_real_data_workflow.py
+@@ -44,3 +44,42 @@ def test_real_data_workflow_exports_input_from_existing_sqlite(tmp_path: Path) -
+     assert rows[0]["asset"] == "BTC"
+     assert rows[0]["source_symbol"] == "BTC/USDT:USDT"
+     assert {"open", "high", "low", "close", "volume"}.issubset(rows[0])
++
++
++def test_real_data_workflow_dry_run_includes_paper_comparison(tmp_path: Path) -> None:
++    root = Path(__file__).resolve().parents[2]
++    db = tmp_path / "market_data.sqlite"
++    replication_input = tmp_path / "replication_input_ohlcv.csv"
++    symbols = tmp_path / "symbols.txt"
++    replication_out = tmp_path / "replication_results"
++    paper_comparison = tmp_path / "paper_gap.md"
++
++    result = subprocess.run(
++        [
++            sys.executable,
++            "scripts/run_real_data_replication.py",
++            "--skip-fetch",
++            "--dry-run",
++            "--exchange",
++            "binanceusdm",
++            "--market-db",
++            str(db),
++            "--replication-input",
++            str(replication_input),
++            "--symbols-out",
++            str(symbols),
++            "--replication-out",
++            str(replication_out),
++            "--paper-comparison-out",
++            str(paper_comparison),
++        ],
++        cwd=root,
++        check=True,
++        capture_output=True,
++        text=True,
++    )
++
++    assert "scripts/compare_replication_to_paper.py" in result.stdout
++    assert str(replication_out / "summary.json") in result.stdout
++    assert str(replication_out / "trades.csv") in result.stdout
++    assert str(paper_comparison) in result.stdout
+diff --git a/scripts/compare_replication_to_paper.py b/scripts/compare_replication_to_paper.py
+new file mode 100644
+index 0000000..f988f08
+--- /dev/null
++++ b/scripts/compare_replication_to_paper.py
+@@ -0,0 +1,219 @@
++#!/usr/bin/env python3
++"""Compare a functional replication summary against AGENTICAITA paper aggregates."""
++from __future__ import annotations
++
++import argparse
++import csv
++import json
++from pathlib import Path
++from typing import Any
++
++
++PAPER_BASELINE: dict[str, Any] = {
++    "total_invocations": 157,
++    "analyst_long": 142,
++    "analyst_short": 2,
++    "analyst_wait": 13,
++    "risk_approved": 139,
++    "risk_rejected": 5,
++    "trades_executed": 139,
++    "unique_traded_assets": 76,
++    "wins": 72,
++    "losses": 67,
++    "gross_profit_usd": 79.67,
++    "gross_loss_usd_abs": 94.74,
++    "net_pnl_usd": -15.07,
++    "total_notional_usd": 26079.0,
++    "win_rate_pct": 51.80,
++    "profit_factor": 0.841,
++    "agentic_friction_pct": 11.5,
++    "reported_alpha_usd": 3896.0,
++}
++
++
++METRIC_LABELS = {
++    "total_invocations": "Total invocations",
++    "analyst_long": "Analyst long signals",
++    "analyst_short": "Analyst short signals",
++    "analyst_wait": "Analyst wait signals",
++    "risk_approved": "Risk Manager approvals",
++    "risk_rejected": "Risk Manager rejections",
++    "trades_executed": "Executed dry-run trades",
++    "unique_traded_assets": "Unique traded assets",
++    "wins": "Winning trades",
++    "losses": "Losing trades",
++    "gross_profit_usd": "Gross profit USD",
++    "gross_loss_usd_abs": "Gross loss USD",
++    "net_pnl_usd": "Net PnL USD",
++    "total_notional_usd": "Total notional USD",
++    "win_rate_pct": "Win rate percent",
++    "profit_factor": "Profit factor",
++    "agentic_friction_pct": "Agentic friction percent",
++    "reported_alpha_usd": "BTC benchmark alpha USD",
++}
++
++
++APPROX_TOLERANCES = {
++    "win_rate_pct": 5.0,
++    "profit_factor": 0.25,
++    "agentic_friction_pct": 5.0,
++}
++
++
++def load_summary(path: str | Path) -> dict[str, Any]:
++    return json.loads(Path(path).read_text(encoding="utf-8"))
++
++
++def read_trade_metrics(path: str | Path | None) -> dict[str, Any]:
++    if path is None:
++        return {}
++    trade_path = Path(path)
++    if not trade_path.exists():
++        return {}
++    with trade_path.open(newline="", encoding="utf-8") as handle:
++        rows = list(csv.DictReader(handle))
++    if not rows:
++        return {"unique_traded_assets": 0, "total_notional_usd": 0.0}
++    assets = {row.get("asset", "") for row in rows if row.get("asset")}
++    total_notional = sum(float(row.get("size_usd") or 0.0) for row in rows)
++    return {"unique_traded_assets": len(assets), "total_notional_usd": total_notional}
++
++
++def replication_values(report: dict[str, Any], trade_metrics: dict[str, Any] | None = None) -> dict[str, Any]:
++    trade_metrics = trade_metrics or {}
++    summary = report.get("summary", {})
++    values = {metric: summary.get(metric) for metric in PAPER_BASELINE}
++    values.update({key: trade_metrics.get(key) for key in ("unique_traded_assets", "total_notional_usd") if key in trade_metrics})
++    values["reported_alpha_usd"] = None
++    return values
++
++
++def classify(metric: str, paper_value: Any, replicated_value: Any) -> str:
++    if replicated_value is None or replicated_value == "":
++        return "unavailable"
++    if paper_value == replicated_value:
++        return "exact"
++    if isinstance(paper_value, (int, float)) and isinstance(replicated_value, (int, float)):
++        if metric in APPROX_TOLERANCES and abs(float(replicated_value) - float(paper_value)) <= APPROX_TOLERANCES[metric]:
++            return "approximate"
++        return "divergent"
++    return "divergent"
++
++
++def build_rows(report: dict[str, Any], trade_metrics: dict[str, Any] | None = None) -> list[dict[str, Any]]:
++    replicated = replication_values(report, trade_metrics)
++    rows = []
++    for metric, paper_value in PAPER_BASELINE.items():
++        replication_value = replicated.get(metric)
++        delta = ""
++        if isinstance(paper_value, (int, float)) and isinstance(replication_value, (int, float)):
++            delta = replication_value - paper_value
++        rows.append(
++            {
++                "metric": metric,
++                "label": METRIC_LABELS[metric],
++                "paper": paper_value,
++                "replication": "" if replication_value is None else replication_value,
++                "delta": delta,
++                "classification": classify(metric, paper_value, replication_value),
++            }
++        )
++    return rows
++
++
++def markdown_table(rows: list[dict[str, Any]]) -> str:
++    lines = ["| Metric | Paper | Replication | Delta | Classification |", "| --- | ---: | ---: | ---: | --- |"]
++    for row in rows:
++        lines.append(
++            f"| {row['label']} | {row['paper']} | {row['replication']} | {row['delta']} | {row['classification']} |"
++        )
++    return "\n".join(lines)
++
++
++def run_context(report: dict[str, Any]) -> dict[str, Any]:
++    metadata = report.get("metadata", {})
++    data = metadata.get("data", {})
++    execution = metadata.get("execution", report.get("execution", {}))
++    config = metadata.get("config", {})
++    return {
++        "data_source": report.get("data_source"),
++        "asset_count": data.get("asset_count"),
++        "candle_count": data.get("candle_count"),
++        "start_timestamp": data.get("start_timestamp"),
++        "end_timestamp": data.get("end_timestamp"),
++        "execution_model": execution.get("execution_model"),
++        "agents": config.get("agents"),
++        "azte": config.get("azte"),
++        "cbd": config.get("cbd"),
++        "risk": config.get("risk"),
++    }
++
++
++def write_markdown(rows: list[dict[str, Any]], report: dict[str, Any], summary_path: str, trades_path: str | None, out_path: str | Path) -> None:
++    counts: dict[str, int] = {}
++    for row in rows:
++        counts[row["classification"]] = counts.get(row["classification"], 0) + 1
++    lines = [
++        "# AGENTICAITA Paper Replication Gap Report",
++        "",
++        f"Replication summary: `{summary_path}`",
++        f"Trades CSV: `{trades_path or 'not supplied'}`",
++        "",
++        "This report compares a functional replication run against the AGENTICAITA paper's reported aggregate values. It measures structural and outcome similarity; it does not prove the original live dry-run because the authors' original artefacts are unavailable.",
++        "",
++        "## Classification Summary",
++        "",
++        "| Classification | Count |",
++        "| --- | ---: |",
++    ]
++    for key in ("exact", "approximate", "divergent", "unavailable"):
++        lines.append(f"| {key} | {counts.get(key, 0)} |")
++    lines.extend(
++        [
++            "",
++            "## Run Context",
++            "",
++            "```json",
++            json.dumps(run_context(report), indent=2),
++            "```",
++            "",
++            "## Paper Baseline Comparison",
++            "",
++            markdown_table(rows),
++            "",
++            "## Interpretation Rules",
++            "",
++            "- `exact`: replication value equals the paper aggregate exactly.",
++            "- `approximate`: replication value is within a deliberately broad structural-comparison tolerance for rate-like metrics.",
++            "- `divergent`: replication value is available but differs outside the comparison tolerance.",
++            "- `unavailable`: the replication summary does not contain enough information to compute the comparison.",
++            "",
++            "## Non-Recoverable Original Artefacts",
++            "",
++            "Public APIs and reconstructed OHLCV/funding data cannot recover the paper's original L2 order book snapshots, original LLM prompts and completions, original Risk Manager approvals, author-side SQLite dry-run logs, or configuration history. Venue substitutions and proxy public data should therefore be treated as functional replication inputs, not evidence of exact historical equivalence.",
++        ]
++    )
++    output = Path(out_path)
++    output.parent.mkdir(parents=True, exist_ok=True)
++    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--summary", required=True, help="replication summary.json")
++    parser.add_argument("--trades", default=None, help="optional replication trades.csv for unique traded assets and notional")
++    parser.add_argument("--out", required=True, help="output Markdown gap report path")
++    return parser
++
++
++def main() -> None:
++    args = build_parser().parse_args()
++    report = load_summary(args.summary)
++    trade_metrics = read_trade_metrics(args.trades)
++    rows = build_rows(report, trade_metrics)
++    write_markdown(rows, report, args.summary, args.trades, args.out)
++    print(f"wrote paper replication gap report to {args.out}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/run_real_data_replication.py b/scripts/run_real_data_replication.py
+index 2e98e6c..15baf85 100644
+--- a/scripts/run_real_data_replication.py
++++ b/scripts/run_real_data_replication.py
+@@ -52,6 +52,8 @@ def parser() -> argparse.ArgumentParser:
+     p.add_argument("--replication-input", default=None)
+     p.add_argument("--symbols-out", default=None)
+     p.add_argument("--replication-out", default=None)
++    p.add_argument("--paper-comparison-out", default=None)
++    p.add_argument("--skip-paper-comparison", action="store_true")
+     p.add_argument("--config", default="replication/config.yaml")
+     p.add_argument("--export-format", choices=("close", "ohlcv"), default="ohlcv")
+     p.add_argument("--include-funding", action="store_true")
+@@ -78,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
+     replication_input = Path(args.replication_input or market_out / "replication_input_ohlcv.csv")
+     symbols_out = Path(args.symbols_out or market_out / f"complete_symbols_{limit}.txt")
+     replication_out = Path(args.replication_out or root / "replication" / f"results_real_{args.exchange}_{scope}")
++    paper_comparison_out = Path(args.paper_comparison_out or replication_out / "paper_replication_gap_report.md")
+     symbols = args.symbols or (baseline_symbols(args.exchange) if args.profile == "baseline-15" else None)
+ 
+     fetch_cmd = None
+@@ -109,14 +112,24 @@ def main(argv: list[str] | None = None) -> int:
+     replicate_cmd = None
+     if not args.skip_replication:
+         replicate_cmd = [args.python, "replication/replicate.py", "--config", args.config, "--input-csv", str(replication_input), "--out", str(replication_out)]
++    paper_compare_cmd = None
++    if not args.skip_replication and not args.skip_paper_comparison:
++        paper_compare_cmd = [
++            args.python, "scripts/compare_replication_to_paper.py",
++            "--summary", str(replication_out / "summary.json"),
++            "--trades", str(replication_out / "trades.csv"),
++            "--out", str(paper_comparison_out),
++        ]
+ 
+-    plan = {"profile": args.profile, "exchange": args.exchange, "paths": {"market_db": str(market_db), "replication_input": str(replication_input), "replication_out": str(replication_out)}, "commands": {"fetch": fetch_cmd, "export": export_cmd, "replicate": replicate_cmd}}
++    plan = {"profile": args.profile, "exchange": args.exchange, "paths": {"market_db": str(market_db), "replication_input": str(replication_input), "replication_out": str(replication_out), "paper_comparison_out": str(paper_comparison_out)}, "commands": {"fetch": fetch_cmd, "export": export_cmd, "replicate": replicate_cmd, "paper_compare": paper_compare_cmd}}
+     print(json.dumps(plan, indent=2), flush=True)
+     if fetch_cmd:
+         run(fetch_cmd, cwd=root, dry_run=args.dry_run)
+     run(export_cmd, cwd=root, dry_run=args.dry_run)
+     if replicate_cmd:
+         run(replicate_cmd, cwd=root, dry_run=args.dry_run)
++    if paper_compare_cmd:
++        run(paper_compare_cmd, cwd=root, dry_run=args.dry_run)
+     return 0
+ 
+ 
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+index 0000000..47180da
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,9 @@
++from __future__ import annotations
++
++import sys
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parents[1]
++if str(ROOT) not in sys.path:
++    sys.path.insert(0, str(ROOT))
+diff --git a/tests/test_compare_replication_to_paper.py b/tests/test_compare_replication_to_paper.py
+new file mode 100644
+index 0000000..69c9c32
+--- /dev/null
++++ b/tests/test_compare_replication_to_paper.py
+@@ -0,0 +1,74 @@
++from __future__ import annotations
++
++import json
++
++from scripts.compare_replication_to_paper import build_rows, read_trade_metrics, write_markdown
++
++
++def make_report() -> dict:
++    return {
++        "data_source": "fixture.csv",
++        "metadata": {
++            "data": {"asset_count": 3, "candle_count": 300, "start_timestamp": "2026-04-06 00:00:00+00:00", "end_timestamp": "2026-04-06 01:39:00+00:00"},
++            "execution": {"execution_model": "ohlcv_intrabar_stop_take_profit"},
++            "config": {"agents": {"analyst": "deterministic"}, "azte": {"z_threshold": 2.0}, "cbd": {"alpha": 0.5}, "risk": {"confidence_gate": 0.65}},
++        },
++        "summary": {
++            "total_invocations": 157,
++            "analyst_long": 142,
++            "analyst_short": 2,
++            "analyst_wait": 13,
++            "risk_approved": 139,
++            "risk_rejected": 5,
++            "trades_executed": 139,
++            "wins": 72,
++            "losses": 67,
++            "gross_profit_usd": 79.67,
++            "gross_loss_usd_abs": 94.74,
++            "net_pnl_usd": -15.07,
++            "win_rate_pct": 52.5,
++            "profit_factor": 0.84,
++            "agentic_friction_pct": 12.0,
++        },
++    }
++
++
++def test_build_rows_classifies_exact_approximate_and_unavailable() -> None:
++    rows = build_rows(make_report(), {"unique_traded_assets": 76, "total_notional_usd": 26079.0})
++    by_metric = {row["metric"]: row for row in rows}
++
++    assert by_metric["total_invocations"]["classification"] == "exact"
++    assert by_metric["win_rate_pct"]["classification"] == "approximate"
++    assert by_metric["reported_alpha_usd"]["classification"] == "unavailable"
++
++
++def test_read_trade_metrics_counts_assets_and_notional(tmp_path) -> None:
++    trades = tmp_path / "trades.csv"
++    trades.write_text("asset,size_usd\nBTC,100\nETH,50.5\nBTC,25\n", encoding="utf-8")
++
++    metrics = read_trade_metrics(trades)
++
++    assert metrics == {"unique_traded_assets": 2, "total_notional_usd": 175.5}
++
++
++def test_write_markdown_gap_report_includes_limitations(tmp_path) -> None:
++    out = tmp_path / "gap.md"
++    rows = build_rows(make_report(), {"unique_traded_assets": 76, "total_notional_usd": 26079.0})
++
++    write_markdown(rows, make_report(), "summary.json", "trades.csv", out)
++
++    content = out.read_text(encoding="utf-8")
++    assert "# AGENTICAITA Paper Replication Gap Report" in content
++    assert "Paper Baseline Comparison" in content
++    assert "original L2 order book snapshots" in content
++    assert "BTC benchmark alpha USD" in content
++
++
++def test_markdown_report_is_json_serialisable_context_safe(tmp_path) -> None:
++    report = make_report()
++    summary = tmp_path / "summary.json"
++    summary.write_text(json.dumps(report), encoding="utf-8")
++
++    rows = build_rows(report)
++
++    assert any(row["classification"] == "unavailable" for row in rows)
