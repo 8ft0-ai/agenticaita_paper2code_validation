@@ -1,0 +1,16 @@
+{
+  "base_ref": "main",
+  "commit_message": "Compute BTC benchmark alpha in replication reports",
+  "implementation_branch": "issue-119-btc-benchmark-alpha",
+  "issue_number": 119,
+  "pr_body": "Closes #119\n\nComputes a price-only BTC buy-and-hold benchmark from replication OHLCV artefacts, reports benchmark PnL and replication alpha, and preserves an explicit distinction from the paper's funding-adjusted benchmark.",
+  "pr_title": "Compute BTC benchmark alpha in replication reports",
+  "schema_version": 2,
+  "validation": [
+    "git diff --check",
+    "git apply --check against reconstructed files from main c8575c3f6ec6b468956c7a9b95cc4177ff77d4fa",
+    "python -m pytest tests/test_compare_replication_to_paper.py -q (6 passed)",
+    "python -m pytest replication/tests/test_real_data_workflow.py::test_real_data_workflow_dry_run_includes_paper_comparison -q (1 passed)",
+    "manual CLI fixture verified BTC benchmark PnL and alpha output"
+  ]
+}
