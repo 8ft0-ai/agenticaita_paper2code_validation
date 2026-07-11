@@ -1,57 +1,110 @@
 #!/usr/bin/env python3
-"""Bootstrap a new arXiv paper validation/replication workspace.
-
-The generated scaffold is intentionally lightweight. It creates documentation
-and directory boundaries that force claim-ledger, artefact, validation, and
-replication decisions before substantial implementation begins.
-"""
-
+"""Create a lightweight, auditable paper-validation project scaffold."""
 from __future__ import annotations
 
 import argparse
 import json
+import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Iterable
+
+SCAFFOLD_VERSION = "2.0"
+MODERN_ARXIV_ID = re.compile(r"^\d{4}\.\d{4,5}$")
+LEGACY_ARXIV_ID = re.compile(r"^[a-z-]+(?:\.[A-Z]{2})?/\d{7}$", re.IGNORECASE)
+PAPER_VERSION = re.compile(r"^v[1-9]\d*$", re.IGNORECASE)
+
+TEMPLATE_TARGETS = {
+    "claim_ledger.csv": "docs/claims/claim_ledger.csv",
+    "artifact_inventory.md": "docs/artifacts/artifact_inventory.md",
+    "validation_plan.md": "docs/validation/validation_plan.md",
+    "replication_plan.md": "docs/replication/replication_plan.md",
+    "final_report.md": "docs/reports/final_report_template.md",
+}
+
+
+@dataclass(frozen=True)
+class Options:
+    project_dir: Path
+    title: str
+    arxiv_id: str
+    paper_version: str
+    paper_url: str
+    authors: str
+    field: str
+    task: str
+    template_dir: Path
+    with_issue_specs: bool
+    with_ci: bool
+    dry_run: bool
+    update_missing: bool
+    force: bool
 
 
 def slugify(value: str) -> str:
-    chars = []
-    previous_dash = False
-    for char in value.lower():
-        if char.isalnum():
-            chars.append(char)
-            previous_dash = False
-        elif not previous_dash:
-            chars.append("-")
-            previous_dash = True
-    return "".join(chars).strip("-") or "paper-validation"
+    value = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return value or "paper-validation"
 
 
-def write_file(path: Path, content: str, force: bool) -> None:
-    if path.exists() and not force:
-        raise SystemExit(f"Refusing to overwrite existing file: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+def validate_arxiv_id(value: str) -> str:
+    value = value.strip()
+    if not (MODERN_ARXIV_ID.fullmatch(value) or LEGACY_ARXIV_ID.fullmatch(value)):
+        raise argparse.ArgumentTypeError(
+            "arXiv ID must look like 2501.01234 or hep-th/9901001"
+        )
+    return value
 
 
-def metadata(args: argparse.Namespace) -> dict[str, str]:
+def validate_paper_version(value: str) -> str:
+    value = value.strip().lower()
+    if not PAPER_VERSION.fullmatch(value):
+        raise argparse.ArgumentTypeError("paper version must look like v1, v2, ...")
+    return value
+
+
+def metadata(opts: Options) -> dict[str, str]:
     return {
-        "title": args.title,
-        "slug": slugify(args.title),
-        "arxiv_id": args.arxiv_id,
-        "paper_version": args.paper_version,
-        "paper_url": args.paper_url or "TBD",
-        "authors": args.authors or "TBD",
-        "field": args.field or "TBD",
-        "task": args.task or "TBD",
+        "title": opts.title,
+        "slug": slugify(opts.title),
+        "arxiv_id": opts.arxiv_id,
+        "paper_version": opts.paper_version,
+        "paper_url": opts.paper_url or f"https://arxiv.org/abs/{opts.arxiv_id}",
+        "authors": opts.authors or "TBD",
+        "field": opts.field or "TBD",
+        "task": opts.task or "TBD",
         "created": date.today().isoformat(),
+        "scaffold_version": SCAFFOLD_VERSION,
     }
 
 
-def readme(meta: dict[str, str]) -> str:
+def render(content: str, meta: dict[str, str]) -> str:
+    for key, value in meta.items():
+        content = content.replace("{{" + key.upper() + "}}", value)
+    return content
+
+
+def read_templates(template_dir: Path, meta: dict[str, str]) -> dict[str, str]:
+    if not template_dir.is_dir():
+        raise SystemExit(f"Template directory does not exist: {template_dir}")
+    generated: dict[str, str] = {}
+    missing: list[str] = []
+    for name, target in TEMPLATE_TARGETS.items():
+        path = template_dir / name
+        if not path.is_file():
+            missing.append(name)
+            continue
+        generated[target] = render(path.read_text(encoding="utf-8"), meta)
+    if missing:
+        raise SystemExit("Missing required templates: " + ", ".join(sorted(missing)))
+    return generated
+
+
+def project_readme(meta: dict[str, str]) -> str:
     return f"""# {meta['title']} Validation and Replication
 
-Created: {meta['created']}
+Created: {meta['created']}  
+Scaffold: v{meta['scaffold_version']}
 
 | Field | Value |
 | --- | --- |
@@ -63,37 +116,20 @@ Created: {meta['created']}
 | Field | {meta['field']} |
 | Task | {meta['task']} |
 
-## Scope
+## Current scope
 
-This project validates and/or replicates the paper above. The initial scope must be filled before implementation work expands.
+Complete `docs/intake/paper_intake.md` and Gate A before implementation expands. The default scope supports static validation, artefact audit, public-data reconstruction, and functional replication. It does not support an empirical-reproduction claim without the original code/data/evaluation path and materially equivalent runtime context.
 
-Supported by default:
+## Start here
 
-- paper-level arithmetic and statistical validation;
-- artefact inventory and missing-evidence documentation;
-- public-data reconstruction where sources are available;
-- functional replication of described methods where implementation details are sufficient.
-
-Not supported by default:
-
-- exact empirical reproduction without original data, logs, configurations, model artefacts, prompts, and evaluation scripts;
-- claims about live/autonomous execution without runtime provenance;
-- claims that require private or unreleased artefacts.
-
-## Starter Documents
-
-- `docs/intake/paper_intake.md`
-- `docs/claims/claim_ledger.csv`
-- `docs/artifacts/artifact_inventory.md`
-- `docs/artifacts/artifact_request.md`
-- `docs/validation/validation_plan.md`
-- `docs/replication/replication_plan.md`
-- `docs/evidence/evidence_plan.md`
-- `docs/reports/final_report_template.md`
-
-## Local Artefact Policy
-
-Raw data, generated results, caches, credentials, provider logs, and large outputs should remain local by default. Commit compact evidence bundles and human-readable reports only when they contain no secrets and are small enough for review.
+1. `docs/intake/paper_intake.md`
+2. `docs/claims/claim_ledger.csv`
+3. `docs/artifacts/artifact_inventory.md`
+4. `docs/governance/data_and_licensing.md`
+5. `docs/decisions/gate_log.md`
+6. `docs/validation/validation_plan.md`
+7. `docs/replication/replication_plan.md`
+8. `docs/review/final_independent_review.md`
 """
 
 
@@ -124,7 +160,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 
-# Notebooks and local scratch by default
+# Notebooks and local scratch
 .ipynb_checkpoints/
 scratch/
 tmp/
@@ -136,455 +172,184 @@ def intake(meta: dict[str, str]) -> str:
 
 Date created: {meta['created']}
 
-## Paper Identity
+## Paper identity
 
 | Field | Value |
 | --- | --- |
 | Title | {meta['title']} |
 | arXiv ID | {meta['arxiv_id']} |
-| Version | {meta['paper_version']} |
+| Frozen version | {meta['paper_version']} |
 | URL | {meta['paper_url']} |
 | Authors | {meta['authors']} |
-| Field | {meta['field']} |
-| Task | {meta['task']} |
+| Date accessed | TBD |
 
-## Headline Claims
+## Headline claims
 
-- TBD
+| Claim | Importance | Why it matters |
+| --- | --- | --- |
+| TBD | headline/supporting/contextual | TBD |
 
-## Claimed Data Sources
+## Released and missing artefacts
 
-- TBD
+- Released: TBD
+- Missing: TBD
 
-## Claimed Method Components
+## Initial scope and stopping rules
 
-- TBD
-
-## Claimed Evaluation Setup
-
-- TBD
-
-## Released Artefacts
-
-- TBD
-
-## Missing Artefacts
-
-- TBD
-
-## Initial Reproduction Boundary
-
-TBD. State whether this project targets static validation, direct rerun, public-data proxy replication, clean-room functional replication, synthetic replication, or a component diagnostic.
-
-## Initial Scope Statement
-
-TBD. Use precise language about what can and cannot be independently reproduced from available materials.
-"""
-
-
-def claim_ledger() -> str:
-    return """claim_id,location,claim_text,reported_value,dependencies,validation_method,status,notes
-C001,TBD,TBD,TBD,TBD,TBD,unreviewed,TBD
+- Selected project type: TBD
+- What would change the final conclusion: TBD
+- Conditions that stop direct reproduction: TBD
+- Conditions that justify functional/proxy work: TBD
 """
 
 
 def claim_status_guide() -> str:
     return """# Claim Status Guide
 
-Use these statuses in `claim_ledger.csv`.
+Use `unreviewed`, `supported`, `partially_supported`, `unsupported`, `contradicted`, or `not_testable`.
 
-| Status | Meaning |
-| --- | --- |
-| `unreviewed` | Extracted but not evaluated yet. |
-| `supported` | Independently recomputed or observed from available artefacts. |
-| `partially_supported` | A narrower version is supported, but the full claim requires missing context. |
-| `unsupported` | Required artefacts or details are unavailable. |
-| `contradicted` | Available evidence conflicts with the claim or another paper statement. |
-| `not_testable` | The claim is too vague or qualitative to operationalize. |
-
-Do not mark a claim as `supported` just because an implementation produced a similar aggregate result. Record the artefact or calculation that supports it.
-"""
-
-
-def artifact_inventory() -> str:
-    return """# Artefact Inventory
-
-## Summary
-
-| Artefact | Status | Location | Needed For | Notes |
-| --- | --- | --- | --- | --- |
-| Paper PDF/source | TBD | TBD | Claim extraction | TBD |
-| Code repository | TBD | TBD | Direct rerun or implementation reference | TBD |
-| Raw dataset | TBD | TBD | Empirical reproduction | TBD |
-| Processed dataset | TBD | TBD | Validation or rerun | TBD |
-| Runtime logs | TBD | TBD | Execution provenance | TBD |
-| Model artefacts | TBD | TBD | Model behaviour reproduction | TBD |
-| Prompts/completions | TBD | TBD | LLM decision reproduction | TBD |
-| Evaluation scripts | TBD | TBD | Metric validation | TBD |
-| Environment/dependencies | TBD | TBD | Rerun fidelity | TBD |
-
-## Reproduction Consequences
-
-- TBD
+A supported claim must cite evidence or a reproducible calculation. Similar aggregate output from a different implementation is not sufficient. Record extraction method and confidence separately from claim status.
 """
 
 
 def artifact_request() -> str:
     return """# Artefact Request
 
-To independently reproduce the reported experiment, request the following from the authors or source repository.
+Request only artefacts material to the prioritised claims:
 
-1. Exact raw input dataset(s), including timestamps, entity identifiers, filters, and exclusions.
-2. Processed datasets or scripts that generate them from raw inputs.
-3. Train/validation/test splits, random seeds, and sampling rules.
-4. Full configuration used for each reported run.
-5. Runtime logs, audit traces, decisions, retries, and failure records.
-6. Model identifiers, weights, prompts, sampling parameters, and provider/server details.
-7. Evaluation scripts and benchmark construction logic.
-8. Dependency versions, hardware assumptions, and external API versions.
-9. Manual intervention, filtering, tuning, or post-processing records.
+1. exact raw and processed inputs, filters, exclusions, and splits;
+2. original code and evaluation scripts;
+3. configuration, seeds, dependency lockfiles, container images, and hardware assumptions;
+4. runtime logs, checkpoints, traces, retries, failures, and manual interventions;
+5. model identifiers, weights, prompts, completions, provider versions, and tool context;
+6. benchmark construction and post-processing logic;
+7. licence, redistribution, and retention constraints.
 
-## Paper-Specific Additions
+## Paper-specific request
 
 - TBD
 """
 
 
-def validation_plan() -> str:
-    return """# Validation Plan
+def project_profile() -> str:
+    return """# Project Profile
 
-## Goal
+Repository-specific instructions belong here rather than in the universal playbook.
 
-Validate claims that can be checked from the paper text, released artefacts, or public data. Do not conflate validation with empirical reproduction.
+## Runtime and dependencies
 
-## Static Checks
+- Runtime version: TBD
+- Dependency install/lock command: TBD
+- Container image/digest: TBD
+- Hardware requirements: TBD
 
-| Claim IDs | Check | Inputs | Expected Output | Notes |
-| --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD |
+## Validation commands
 
-## Statistical Checks
+- Static validation: TBD
+- Unit tests: TBD
+- Documentation/link checks: TBD
+- Smoke run: TBD
 
-| Claim IDs | Test/Statistic | Inputs | Assumptions | Notes |
-| --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD |
+## Contribution workflow
 
-## Public-Data Checks
+- Branch/PR or broker process: TBD
+- Generated-output exclusions: `data/`, `results/`, `outputs/`
+- Required credentials and secret names: TBD
+"""
 
-| Claim IDs | Source | Coverage Needed | Smoke Test | Notes |
-| --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD |
 
-## Unsupported Claims
+def governance_files() -> dict[str, str]:
+    return {
+        "docs/governance/data_and_licensing.md": """# Data and Licensing Decision
 
-| Claim IDs | Missing Artefact | Consequence |
+Complete before bulk collection or redistribution.
+
+| Question | Decision | Evidence/owner |
 | --- | --- | --- |
-| TBD | TBD | TBD |
+| Dataset licence permits intended use | TBD | TBD |
+| Redistribution or sample commitment permitted | TBD | TBD |
+| API terms and scraping restrictions reviewed | TBD | TBD |
+| Personal/sensitive data present | TBD | TBD |
+| Provider/model output retention restrictions reviewed | TBD | TBD |
+| External artefact retention owner and expiry | TBD | TBD |
 
-## Planned Outputs
+Gate result: `pending`.
+""",
+        "docs/governance/retention_policy.md": """# Retention Policy
 
-- validation report;
-- claim-ledger status summary;
-- machine-readable validation results;
-- negative findings where applicable.
-"""
+Raw datasets, large outputs, provider logs, secrets, and local databases remain outside git by default. Commit code, plans, claim ledgers, compact manifests/evidence, small fixtures, and reviewed reports. Record external storage location, owner, checksum, and retention period when raw evidence is retained elsewhere.
+""",
+        "docs/decisions/gate_log.md": """# Decision Gate Log
 
+| Gate | Decision | Date | Evidence | Reviewer | Consequence |
+| --- | --- | --- | --- | --- | --- |
+| A — scope and artefacts | pending | TBD | TBD | TBD | TBD |
+| B — data/legal adequacy | pending | TBD | TBD | TBD | TBD |
+| C — claim and metric definition | pending | TBD | TBD | TBD | TBD |
+| D — implementation value | pending | TBD | TBD | TBD | TBD |
+| E — expensive run readiness | pending | TBD | TBD | TBD | TBD |
+| F — final independent review | pending | TBD | TBD | TBD | TBD |
+""",
+        "docs/versions/paper_version_log.md": """# Paper Version Log
 
-def replication_plan() -> str:
-    return """# Replication Plan
+Freeze each milestone against one paper version. Do not silently replace claims when a new version appears.
 
-## Replication Type
+| Version | Accessed | Changes affecting claims | Action |
+| --- | --- | --- | --- |
+| TBD | TBD | Initial frozen version | Establish claim ledger |
+""",
+        "docs/review/final_independent_review.md": """# Final Independent Review
 
-Choose one or more:
+Reviewer should work from a clean context and verify:
 
-- direct rerun;
-- clean-room functional replication;
-- public-data proxy replication;
-- synthetic replication;
-- component diagnostic.
+- paper locations and extracted values;
+- formulas, denominators, exclusions, and benchmark definitions;
+- claim statuses and evidence references;
+- environment and run provenance;
+- unsupported inferences and proxy/reproduction language;
+- agreement between generated evidence and narrative reports.
 
-Selected type: TBD
-
-## Component Mapping
-
-| Paper Component | Planned Implementation | Fidelity | Missing Details | Notes |
-| --- | --- | --- | --- | --- |
-| Input data | TBD | TBD | TBD | TBD |
-| Preprocessing | TBD | TBD | TBD | TBD |
-| Model/method | TBD | TBD | TBD | TBD |
-| Runtime pipeline | TBD | TBD | TBD | TBD |
-| Evaluation | TBD | TBD | TBD | TBD |
-
-## Run Artefacts
-
-- run manifest;
-- input coverage report;
-- pipeline or decision log;
-- summary metrics;
-- comparison-to-paper report;
-- compact evidence bundle.
-
-## Non-Reproduction Boundaries
-
-- TBD
-"""
-
-
-def evidence_plan() -> str:
-    return """# Evidence Plan
-
-## Policy
-
-Raw data and large generated outputs remain local by default. Commit compact evidence that is small, non-secret, and enough to audit the report.
-
-## Local-Only Artefacts
-
-- raw datasets;
-- downloaded API data;
-- full generated result directories;
-- provider logs and raw model completions;
-- credentials and environment files.
-
-## Commit-Eligible Artefacts
-
-- claim ledger;
-- validation reports;
-- public-data coverage summaries;
-- run manifests without secrets;
-- compact evidence bundles;
-- final assessment.
-
-## Evidence Bundle Requirements
-
-- paper identity;
-- command and git commit;
-- input summary and checksums;
-- output summary and checksums;
-- limitations and missing artefacts.
-"""
-
-
-def evidence_bundle_template(meta: dict[str, str]) -> str:
-    bundle = {
-        "paper": {
-            "title": meta["title"],
-            "arxiv_id": meta["arxiv_id"],
-            "version": meta["paper_version"],
-            "url": meta["paper_url"],
-        },
-        "run": {
-            "command": "TBD",
-            "git_commit": "TBD",
-            "started_at": "TBD",
-            "finished_at": "TBD",
-        },
-        "inputs": {
-            "source": "TBD",
-            "rows": None,
-            "entities": None,
-            "coverage_summary": "TBD",
-            "checksums": {},
-        },
-        "outputs": {
-            "summary_metrics": {},
-            "result_counts": {},
-            "checksums": {},
-        },
-        "limitations": [],
+Decision: `pending`.
+""",
     }
-    return json.dumps(bundle, indent=2) + "\n"
-
-
-def milestone_review() -> str:
-    return """# Milestone Review
-
-## Current Status
-
-- Date: TBD
-- Reviewer: TBD
-- Git commit: TBD
-
-## Claim-Ledger Status
-
-| Status | Count |
-| --- | ---: |
-| supported | TBD |
-| partially_supported | TBD |
-| unsupported | TBD |
-| contradicted | TBD |
-| not_testable | TBD |
-
-## Key Findings
-
-- TBD
-
-## Reproduction Boundary
-
-TBD. State whether direct empirical reproduction is possible from available artefacts.
-
-## Next Work
-
-1. TBD
-"""
-
-
-def final_report_template() -> str:
-    return """# Final Validation and Replication Report
-
-## Executive Conclusion
-
-TBD. Lead with what is supported, what is unsupported, and whether empirical reproduction is possible.
-
-## Paper and Scope
-
-- Title: TBD
-- arXiv ID/version: TBD
-- Date accessed: TBD
-- Replication type: TBD
-
-## Artefact Availability
-
-TBD.
-
-## Claim Validation Summary
-
-TBD.
-
-## Static Validation Results
-
-TBD.
-
-## Public-Data Reconstruction
-
-TBD.
-
-## Functional Replication
-
-TBD.
-
-## Comparison to Paper
-
-TBD.
-
-## Negative Findings and Contradictions
-
-TBD.
-
-## Evidence and Commands
-
-TBD.
-
-## Limitations
-
-TBD.
-
-## Final Assessment
-
-TBD. Use precise language: validated, functionally replicated, proxy comparison, unsupported, or not independently reproducible.
-"""
 
 
 def component_readme(name: str) -> str:
-    return f"""# {name}
-
-Purpose: TBD.
-
-Keep this directory focused. Document commands, inputs, outputs, and limitations as implementation is added.
-"""
+    return f"# {name}\n\nPurpose, commands, inputs, outputs, and limitations: TBD.\n"
 
 
-def issue_spec(title: str, goal: str, deliverables: list[str]) -> str:
-    deliverable_lines = "\n".join(f"- {item}" for item in deliverables)
+def issue_spec(title: str, goal: str) -> str:
     return f"""# {title}
 
 ## Goal
 
 {goal}
 
-## Deliverables
+## Acceptance criteria
 
-{deliverable_lines}
-
-## Acceptance Criteria
-
-- Scope is explicit.
-- Commands or manual review steps are documented.
-- Unsupported claims or missing artefacts are recorded.
-- Outputs are linked from the relevant report or plan.
+- linked claim IDs and priority are explicit;
+- commands or review steps are documented;
+- evidence and limitations are recorded;
+- stopping condition is stated;
+- outputs are linked from the relevant plan or report.
 """
 
 
 def issue_files() -> dict[str, str]:
-    return {
-        "docs/issues/01-paper-intake.md": issue_spec(
-            "Paper Intake and Scope",
-            "Record paper identity, headline claims, available artefacts, missing artefacts, and initial reproduction boundary.",
-            [
-                "completed `docs/intake/paper_intake.md`",
-                "initial scope statement",
-                "list of immediate reproduction blockers",
-            ],
-        ),
-        "docs/issues/02-claim-ledger.md": issue_spec(
-            "Claim Ledger Extraction",
-            "Extract material claims from the paper into stable claim IDs with locations, dependencies, and planned validation methods.",
-            [
-                "populated `docs/claims/claim_ledger.csv`",
-                "status definitions applied consistently",
-                "headline claims covered",
-            ],
-        ),
-        "docs/issues/03-static-validation.md": issue_spec(
-            "Static Validation Checks",
-            "Implement and test arithmetic or statistical checks that can be recomputed from available materials.",
-            [
-                "validation formulas documented",
-                "tests for implemented checks",
-                "validation report draft",
-            ],
-        ),
-        "docs/issues/04-data-smoke.md": issue_spec(
-            "Data Availability Smoke Test",
-            "Verify whether public or released data sources can support the required paper window, entities, schema, and granularity.",
-            [
-                "small smoke fetch or manual availability check",
-                "coverage notes",
-                "fallback/proxy decision if needed",
-            ],
-        ),
-        "docs/issues/05-replication-skeleton.md": issue_spec(
-            "Replication Skeleton",
-            "Create the smallest auditable implementation that maps paper components to runnable code.",
-            [
-                "component mapping completed",
-                "tiny synthetic or fixture run",
-                "pipeline outputs defined",
-            ],
-        ),
-        "docs/issues/06-evidence-bundle.md": issue_spec(
-            "Compact Evidence Bundle",
-            "Create small non-secret evidence bundles that summarize inputs, outputs, commands, checksums, and limitations.",
-            [
-                "evidence bundle generated",
-                "large local artefacts excluded from git",
-                "evidence linked from reports",
-            ],
-        ),
-        "docs/issues/07-final-assessment.md": issue_spec(
-            "Final Assessment",
-            "Write the final report with supported claims, unsupported claims, negative findings, evidence links, and reproduction boundary.",
-            [
-                "final report completed",
-                "claim statuses summarized",
-                "missing author artefacts listed",
-            ],
-        ),
-    }
+    specs = [
+        ("01-intake-and-gate-a.md", "Paper intake and Gate A", "Freeze the paper version, prioritise headline claims, inventory artefacts, and decide the reproduction boundary."),
+        ("02-claim-ledger.md", "Prioritised claim ledger", "Extract material claims with importance, validation priority, extraction confidence, dependencies, and evidence references."),
+        ("03-static-validation.md", "Static validation", "Implement and test all high-priority arithmetic and statistical checks that available materials permit."),
+        ("04-data-and-legal-smoke.md", "Data and legal smoke", "Verify coverage, licence, retention, schema, rate limits, and redistribution constraints before bulk acquisition."),
+        ("05-replication-skeleton.md", "Minimal replication skeleton", "Implement the smallest auditable system needed to exercise the prioritised claim boundary."),
+        ("06-evidence-bundle.md", "Compact evidence bundle", "Capture environment, inputs, outputs, hashes, limitations, and local-only artefacts without secrets."),
+        ("07-independent-review.md", "Independent final review", "Check extraction, calculations, statuses, evidence, and final language from a clean context."),
+    ]
+    return {f"docs/issues/{path}": issue_spec(title, goal) for path, title, goal in specs}
 
 
-def ci_files() -> dict[str, str]:
-    return {
-        ".github/workflows/validation-smoke.yml": """name: validation-smoke
+def ci_workflow() -> str:
+    return """name: validation-smoke
 
 on:
   pull_request:
@@ -598,30 +363,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Check for large committed files
+      - name: Check for unexpectedly large committed files
         run: |
           python - <<'PY'
           from pathlib import Path
           limit = 5 * 1024 * 1024
-          ignored = {'.git'}
-          too_large = []
-          for path in Path('.').rglob('*'):
-              if not path.is_file() or any(part in ignored for part in path.parts):
-                  continue
-              if path.stat().st_size > limit:
-                  too_large.append(f'{path} ({path.stat().st_size} bytes)')
-          if too_large:
-              raise SystemExit('Large files detected:\n' + '\n'.join(too_large))
+          bad = [str(p) for p in Path('.').rglob('*') if p.is_file() and '.git' not in p.parts and p.stat().st_size > limit]
+          if bad:
+              raise SystemExit('Large files detected:\n' + '\n'.join(bad))
           PY
-      - name: Run tests when present
+      - name: Run tests when Python tests exist
         run: |
-          if [ -d tests ]; then
+          if find tests -type f -name 'test_*.py' -print -quit | grep -q .; then
             python -m pip install pytest
-            pytest tests -q
+            python -m pytest tests -q
           else
-            echo "No tests directory present"
+            echo 'No Python tests present yet'
           fi
-      - name: Basic Markdown link sanity
+      - name: Basic relative Markdown link check
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -631,140 +390,130 @@ jobs:
           for md in Path('.').rglob('*.md'):
               if '.git' in md.parts:
                   continue
-              for match in pattern.finditer(md.read_text(encoding='utf-8')):
-                  target = match.group(1).split('#', 1)[0]
-                  if not target:
-                      continue
-                  if not (md.parent / target).resolve().exists():
+              text = md.read_text(encoding='utf-8')
+              for target in pattern.findall(text):
+                  clean = target.split('#', 1)[0]
+                  if clean and not (md.parent / clean).resolve().exists():
                       missing.append(f'{md}: {target}')
           if missing:
               raise SystemExit('Missing Markdown links:\n' + '\n'.join(missing))
           PY
 """
-    }
 
 
-def base_files(meta: dict[str, str]) -> dict[str, str]:
-    return {
-        "README.md": readme(meta),
+def base_files(meta: dict[str, str], templates: dict[str, str]) -> dict[str, str]:
+    files = {
+        "README.md": project_readme(meta),
         ".gitignore": gitignore(),
+        "PROJECT_PROFILE.md": project_profile(),
         "docs/intake/paper_intake.md": intake(meta),
-        "docs/claims/claim_ledger.csv": claim_ledger(),
         "docs/claims/claim_status_guide.md": claim_status_guide(),
-        "docs/artifacts/artifact_inventory.md": artifact_inventory(),
         "docs/artifacts/artifact_request.md": artifact_request(),
-        "docs/validation/validation_plan.md": validation_plan(),
-        "docs/replication/replication_plan.md": replication_plan(),
-        "docs/evidence/evidence_plan.md": evidence_plan(),
-        "docs/evidence/evidence_bundle_template.json": evidence_bundle_template(meta),
-        "docs/reports/milestone_review.md": milestone_review(),
-        "docs/reports/final_report_template.md": final_report_template(),
         "validation/README.md": component_readme("Validation"),
         "replication/README.md": component_readme("Replication"),
         "scripts/README.md": component_readme("Scripts"),
         "tests/README.md": component_readme("Tests"),
     }
+    files.update(governance_files())
+    files.update(templates)
+    return files
 
 
-def apply_template_overrides(
-    generated_files: dict[str, str], template_dir: Path | None
-) -> dict[str, str]:
-    if template_dir is None:
-        return generated_files
-    if not template_dir.exists() or not template_dir.is_dir():
-        raise SystemExit(f"Template directory does not exist: {template_dir}")
-
-    template_targets = {
-        "claim_ledger.csv": "docs/claims/claim_ledger.csv",
-        "artifact_inventory.md": "docs/artifacts/artifact_inventory.md",
-        "validation_plan.md": "docs/validation/validation_plan.md",
-        "replication_plan.md": "docs/replication/replication_plan.md",
-        "final_report.md": "docs/reports/final_report_template.md",
+def scaffold_files(opts: Options) -> tuple[dict[str, str], dict[str, str]]:
+    meta = metadata(opts)
+    templates = read_templates(opts.template_dir, meta)
+    files = base_files(meta, templates)
+    if opts.with_issue_specs:
+        files.update(issue_files())
+    if opts.with_ci:
+        files[".github/workflows/validation-smoke.yml"] = ci_workflow()
+    manifest = {
+        "scaffold_version": SCAFFOLD_VERSION,
+        "paper": {k: meta[k] for k in ("title", "arxiv_id", "paper_version", "paper_url")},
+        "generated_files": sorted(files),
     }
-
-    for template_name, target in template_targets.items():
-        template_path = template_dir / template_name
-        if template_path.exists():
-            generated_files[target] = template_path.read_text(encoding="utf-8")
-    return generated_files
+    files[".paper-validation-scaffold.json"] = json.dumps(manifest, indent=2) + "\n"
+    return files, meta
 
 
-def files(
-    meta: dict[str, str],
-    with_issues: bool,
-    with_ci: bool,
-    template_dir: Path | None,
-) -> dict[str, str]:
-    generated_files = apply_template_overrides(base_files(meta), template_dir)
-    if with_issues:
-        generated_files.update(issue_files())
-    if with_ci:
-        generated_files.update(ci_files())
-    return generated_files
+def write_plan(project_dir: Path, files: dict[str, str], *, update_missing: bool, force: bool) -> list[tuple[Path, str]]:
+    existing_nonempty = project_dir.exists() and any(project_dir.iterdir())
+    if existing_nonempty and not (update_missing or force):
+        raise SystemExit(f"Refusing to populate non-empty directory: {project_dir}")
+    plan: list[tuple[Path, str]] = []
+    for relative, content in files.items():
+        target = project_dir / relative
+        if target.exists() and not force:
+            if update_missing:
+                continue
+            raise SystemExit(f"Refusing to overwrite existing file: {target}")
+        plan.append((target, content))
+    return plan
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Create a starter workspace for arXiv paper validation and replication."
-    )
-    parser.add_argument("--project-dir", required=True, help="Directory to create or populate.")
-    parser.add_argument("--title", required=True, help="Paper title.")
-    parser.add_argument("--arxiv-id", required=True, help="arXiv identifier, for example 2501.01234.")
-    parser.add_argument("--paper-version", default="v1", help="Paper version, default: v1.")
-    parser.add_argument("--paper-url", default="", help="Paper URL.")
-    parser.add_argument("--authors", default="", help="Semicolon-separated author list.")
-    parser.add_argument("--field", default="", help="Research field or domain.")
-    parser.add_argument("--task", default="", help="Main validation or replication task.")
-    parser.add_argument(
-        "--with-issues",
-        action="store_true",
-        help="Generate starter issue-spec Markdown files under docs/issues/.",
-    )
-    parser.add_argument(
-        "--with-ci",
-        action="store_true",
-        help="Generate a minimal GitHub Actions smoke workflow.",
-    )
-    parser.add_argument(
-        "--template-dir",
-        default="",
-        help="Optional directory containing template overrides by filename.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Allow writing into a non-empty directory and overwriting generated files.",
-    )
-    return parser.parse_args()
+def apply_plan(plan: Iterable[tuple[Path, str]]) -> None:
+    for path, content in plan:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
 
 
-def main() -> int:
-    args = parse_args()
-    project_dir = Path(args.project_dir).expanduser().resolve()
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project-dir", required=True)
+    parser.add_argument("--title", required=True)
+    parser.add_argument("--arxiv-id", required=True, type=validate_arxiv_id)
+    parser.add_argument("--paper-version", required=True, type=validate_paper_version)
+    parser.add_argument("--paper-url", default="")
+    parser.add_argument("--authors", default="")
+    parser.add_argument("--field", default="")
+    parser.add_argument("--task", default="")
+    parser.add_argument("--template-dir", default="")
+    parser.add_argument("--with-issue-specs", action="store_true")
+    parser.add_argument("--with-issues", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--with-ci", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--update-missing", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args(argv)
+    if args.update_missing and args.force:
+        parser.error("--update-missing and --force are mutually exclusive")
+    return args
 
-    if project_dir.exists() and any(project_dir.iterdir()) and not args.force:
-        raise SystemExit(
-            f"Refusing to populate non-empty directory without --force: {project_dir}"
-        )
 
-    project_dir.mkdir(parents=True, exist_ok=True)
-    meta = metadata(args)
-    template_dir = Path(args.template_dir).expanduser().resolve() if args.template_dir else None
-
-    for relative_path, content in files(
-        meta,
-        with_issues=args.with_issues,
-        with_ci=args.with_ci,
+def options_from_args(args: argparse.Namespace) -> Options:
+    script_templates = Path(__file__).resolve().parent / "templates"
+    template_dir = Path(args.template_dir).expanduser().resolve() if args.template_dir else script_templates
+    return Options(
+        project_dir=Path(args.project_dir).expanduser().resolve(),
+        title=args.title.strip(),
+        arxiv_id=args.arxiv_id,
+        paper_version=args.paper_version,
+        paper_url=args.paper_url.strip(),
+        authors=args.authors.strip(),
+        field=args.field.strip(),
+        task=args.task.strip(),
         template_dir=template_dir,
-    ).items():
-        write_file(project_dir / relative_path, content, args.force)
+        with_issue_specs=bool(args.with_issue_specs or args.with_issues),
+        with_ci=bool(args.with_ci),
+        dry_run=bool(args.dry_run),
+        update_missing=bool(args.update_missing),
+        force=bool(args.force),
+    )
 
-    print(f"Created paper validation scaffold: {project_dir}")
-    print("Next steps:")
-    print("1. Fill docs/intake/paper_intake.md")
-    print("2. Populate docs/claims/claim_ledger.csv")
-    print("3. Complete docs/artifacts/artifact_inventory.md")
-    print("4. Decide validation and replication scope before implementation")
+
+def main(argv: list[str] | None = None) -> int:
+    opts = options_from_args(parse_args(argv))
+    files, _ = scaffold_files(opts)
+    plan = write_plan(opts.project_dir, files, update_missing=opts.update_missing, force=opts.force)
+    if opts.dry_run:
+        print("Planned files:")
+        for path, _ in plan:
+            print(path.relative_to(opts.project_dir))
+        return 0
+    opts.project_dir.mkdir(parents=True, exist_ok=True)
+    apply_plan(plan)
+    print(f"Created paper validation scaffold: {opts.project_dir}")
+    print("Next: complete intake, claim priorities, artefact/legal audit, and Gate A before implementation.")
     return 0
 
 
