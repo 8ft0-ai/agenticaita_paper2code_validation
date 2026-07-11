@@ -1,0 +1,2 @@
+claim_id,paper_version,location,claim_type,claim_importance,validation_priority,claim_text,reported_value,dependencies,validation_method,extraction_method,extraction_confidence,manually_verified,status,evidence_refs,status_rationale,notes
+C001,{{PAPER_VERSION}},TBD,headline,headline,critical,TBD,TBD,TBD,TBD,manual_text,TBD,false,unreviewed,TBD,TBD,TBD

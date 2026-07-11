@@ -31,7 +31,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pytest
 
-      - name: Run targeted replication tests
+      - name: Run targeted tests
         shell: bash
         run: |
           set -o pipefail
@@ -43,6 +43,7 @@ jobs:
             tests/test_unique_base_asset_export.py \
             tests/test_analyse_btc_benchmark_window.py \
             tests/test_build_reproducibility_evidence.py \
+            tests/test_bootstrap_paper_project.py \
             -q 2>&1 | tee targeted-replication-tests.txt
 
       - name: Run validation and replication smoke checks
