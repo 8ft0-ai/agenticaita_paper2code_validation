@@ -23,7 +23,7 @@ The fetch stage uses CCXT and public exchange APIs. A baseline run should be tre
 
 ## Baseline 15-symbol workflow
 
-The default profile is the 15-symbol baseline subset used for AGENTICAITA reconstruction work. The default exchange is Binance USD-M because the documented Hyperliquid paper-window attempt returned funding rows but no OHLCV candles. The endpoint and archive constraints are recorded in [`hyperliquid_paper_window_investigation.md`](../investigations/hyperliquid_paper_window_investigation.md).
+The default profile is the 15-symbol baseline subset used for AGENTICAITA reconstruction work. The default exchange is Binance USD-M because the documented Hyperliquid paper-window attempt returned funding rows but no OHLCV candles. The endpoint and archive constraints are recorded in [`hyperliquid_paper_window_investigation.md`](hyperliquid_paper_window_investigation.md).
 
 ```bash
 python scripts/run_real_data_replication.py --profile baseline-15 --exchange binanceusdm
