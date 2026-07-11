@@ -2,351 +2,155 @@
 
 Date: 2026-07-11
 
-## Purpose
+Start with [the operational guide](README.md). This document explains the generated scaffold and the decisions required before implementation expands.
 
-Use this process when starting a new arXiv paper validation or replication project. The goal is to create a clean workspace that separates intake, claim validation, artefact audit, data reconstruction, functional replication, evidence packaging, and final reporting from day one.
-
-This guide pairs with [`bootstrap_paper_project.py`](bootstrap_paper_project.py), a small script that creates a starter project scaffold and Markdown/CSV templates.
-
-## Bootstrap Principles
-
-- Start with claims and artefacts, not code.
-- Make the reproduction boundary explicit before implementation.
-- Keep validation and replication separate.
-- Preserve negative findings as project outputs.
-- Commit small templates, reports, manifests, and evidence summaries.
-- Keep raw data, large generated outputs, secrets, and provider logs outside git by default.
-- Require every final claim to trace back to a paper location, artefact, command, or explicit limitation.
-
-## Recommended Bootstrap Flow
-
-### Step 1: Create the Project Scaffold
-
-From this repository, run:
+## Create the scaffold
 
 ```bash
 python docs/guides/bootstrap_paper_project.py \
   --project-dir ../new_paper_validation \
   --title "Paper Title" \
   --arxiv-id "2501.01234" \
-  --paper-version "v1"
-```
-
-Add optional metadata when known:
-
-```bash
-python docs/guides/bootstrap_paper_project.py \
-  --project-dir ../new_paper_validation \
-  --title "Paper Title" \
-  --arxiv-id "2501.01234" \
-  --paper-version "v1" \
-  --paper-url "https://arxiv.org/abs/2501.01234" \
+  --paper-version "v2" \
   --authors "A. Author; B. Author" \
   --field "machine learning" \
-  --task "benchmark replication"
-```
-
-Generate starter issue specs and a minimal CI workflow when useful:
-
-```bash
-python docs/guides/bootstrap_paper_project.py \
-  --project-dir ../new_paper_validation \
-  --title "Paper Title" \
-  --arxiv-id "2501.01234" \
-  --with-issues \
+  --task "benchmark replication" \
+  --with-issue-specs \
   --with-ci
 ```
 
-Use standalone template overrides from a directory when the default templates need local customization:
+The paper version is required; the script will not silently assume `v1`. The arXiv URL is derived automatically unless supplied explicitly.
 
-```bash
-python docs/guides/bootstrap_paper_project.py \
-  --project-dir ../new_paper_validation \
-  --title "Paper Title" \
-  --arxiv-id "2501.01234" \
-  --template-dir docs/guides/templates
-```
+Use `--dry-run` to inspect the generated file plan. A non-empty target is refused by default. Use `--update-missing` to add only absent scaffold files. `--force` deliberately replaces generated paths and should be used only after reviewing the plan. `--update-missing` and `--force` are mutually exclusive.
 
-Recognized template override filenames are:
+The deprecated `--with-issues` alias remains accepted for compatibility, but the option creates issue specifications rather than remote GitHub issues. Prefer `--with-issue-specs`.
 
-- `claim_ledger.csv`;
-- `artifact_inventory.md`;
-- `validation_plan.md`;
-- `replication_plan.md`;
-- `final_report.md`.
+## Generated project controls
 
-The script refuses to overwrite an existing non-empty directory unless `--force` is used. Prefer creating a fresh directory instead of forcing over previous work.
-
-### Step 2: Fill the Intake Brief
-
-Edit `docs/intake/paper_intake.md` before writing implementation code.
-
-Minimum information:
-
-- exact paper version;
-- date accessed;
-- headline claims;
-- claimed datasets and benchmarks;
-- released artefacts;
-- missing artefacts;
-- initial reproduction scope.
-
-The intake brief should end with a precise scope statement such as:
-
-```text
-This project will validate paper-level arithmetic and implement a functional replication on public data. It will not claim empirical reproduction unless the original dataset, runtime logs, configuration, and evaluation artefacts are provided.
-```
-
-### Step 3: Build the Claim Ledger
-
-Populate `docs/claims/claim_ledger.csv` with every material claim before implementation expands.
-
-Start with:
-
-- abstract headline result;
-- main table metrics;
-- benchmark comparisons;
-- dataset sizes and filters;
-- training or runtime settings;
-- autonomy, live-system, or zero-intervention claims;
-- cost, latency, robustness, and generalization claims.
-
-Use stable claim IDs such as `C001`, `C002`, and so on. Every final report section should cite these IDs.
-
-### Step 4: Complete the Artefact Audit
-
-Edit `docs/artifacts/artifact_inventory.md` and `docs/artifacts/artifact_request.md`.
-
-Classify each required artefact as:
-
-- available and committed;
-- available externally;
-- reconstructable from public sources;
-- unavailable;
-- ambiguous;
-- not applicable.
-
-If an artefact is unavailable, write the consequence. For example:
-
-```text
-Original prompt/completion logs are unavailable. Therefore LLM behavioural claims can be compared against a new model run, but the original decision path cannot be independently reproduced.
-```
-
-### Step 5: Write the Validation Plan
-
-Edit `docs/validation/validation_plan.md`.
-
-Define:
-
-- static arithmetic checks;
-- statistical recomputations;
-- parser requirements;
-- public-data availability checks;
-- unsupported claims and why;
-- expected outputs.
-
-Do not wait for implementation to decide what `supported`, `partially supported`, `unsupported`, and `contradicted` mean.
-
-### Step 6: Write the Replication Plan
-
-Edit `docs/replication/replication_plan.md`.
-
-Decide whether the project is attempting:
-
-- direct rerun;
-- clean-room functional replication;
-- public-data proxy replication;
-- synthetic replication;
-- component diagnostic.
-
-Map paper components to repository components before coding. If a paper component is underspecified, record the assumption in the plan.
-
-### Step 7: Establish Data and Evidence Policy
-
-Review `docs/evidence/evidence_plan.md` and `.gitignore`.
-
-Default policy:
-
-- `data/` is local and gitignored;
-- `results/` is local and gitignored;
-- `docs/evidence/` is for compact, non-secret evidence bundles;
-- raw provider logs, API responses, model completions, and large generated outputs are not committed by default.
-
-### Step 8: Add Minimal Code Only After Plans Exist
-
-Use these starter directories:
-
-- `validation/` for claim checks and static validation;
-- `replication/` for functional implementation;
-- `scripts/` for standalone tooling;
-- `tests/` for root-level tests.
-
-Recommended first code tasks:
-
-1. Implement claim-ledger loading and status summaries.
-2. Implement one or two static validation checks.
-3. Add tests for those checks.
-4. Add a tiny CLI smoke path.
-5. Only then start public-data fetching or model replication.
-
-### Step 9: Create Issues or Work Items
-
-If using GitHub Issues, open scoped issues in this order:
-
-1. Paper intake and artefact inventory.
-2. Claim ledger extraction.
-3. Static validation checks.
-4. Data availability smoke test.
-5. Public-data reconstruction, if applicable.
-6. Functional architecture skeleton.
-7. End-to-end tiny run.
-8. Full run and evidence bundle.
-9. Comparison report.
-10. Final assessment.
-
-Avoid a single broad issue named `replicate paper`. It causes scope drift and encourages overclaiming.
-
-### Step 10: First Milestone Review
-
-Before large implementation work, perform a milestone review using `docs/reports/milestone_review.md`.
-
-The review should answer:
-
-- Which claims are already checkable?
-- Which claims require missing artefacts?
-- Which data sources are available?
-- What is the exact replication type?
-- What would change the final conclusion?
-
-If the answer is already `not reproducible from available artefacts`, keep going only if functional replication or diagnostic validation is still valuable.
-
-## Scaffold Layout
-
-The bootstrap script creates this structure:
+The scaffold creates:
 
 ```text
 <project>/
   README.md
-  .gitignore
+  PROJECT_PROFILE.md
+  .paper-validation-scaffold.json
   docs/
-    intake/
-      paper_intake.md
-    claims/
-      claim_ledger.csv
-      claim_status_guide.md
-    artifacts/
-      artifact_inventory.md
-      artifact_request.md
-    validation/
-      validation_plan.md
-    replication/
-      replication_plan.md
-    evidence/
-      evidence_plan.md
-      evidence_bundle_template.json
-    reports/
-      milestone_review.md
-      final_report_template.md
-  validation/
-    README.md
-  replication/
-    README.md
-  scripts/
-    README.md
-  tests/
-    README.md
+    intake/paper_intake.md
+    claims/claim_ledger.csv
+    claims/claim_status_guide.md
+    artifacts/artifact_inventory.md
+    artifacts/artifact_request.md
+    governance/data_and_licensing.md
+    governance/retention_policy.md
+    decisions/gate_log.md
+    versions/paper_version_log.md
+    validation/validation_plan.md
+    replication/replication_plan.md
+    review/final_independent_review.md
+    reports/final_report_template.md
+  validation/README.md
+  replication/README.md
+  scripts/README.md
+  tests/README.md
 ```
 
-With `--with-issues`, the scaffold also includes:
+`--with-issue-specs` adds claim-scoped work items under `docs/issues/`. `--with-ci` adds a minimal workflow that checks committed file size, runs Python tests only when test files exist, and validates relative Markdown links.
 
-```text
-docs/issues/
-  01-paper-intake.md
-  02-claim-ledger.md
-  03-static-validation.md
-  04-data-smoke.md
-  05-replication-skeleton.md
-  06-evidence-bundle.md
-  07-final-assessment.md
-```
+## First-day sequence
 
-With `--with-ci`, the scaffold also includes:
+### 1. Freeze paper identity
 
-```text
-.github/workflows/validation-smoke.yml
-```
+Complete `docs/intake/paper_intake.md` and `docs/versions/paper_version_log.md`. A later arXiv revision must create a version-diff record; do not silently replace the claim ledger.
 
-## First-Day Checklist
+### 2. Prioritise claims
 
-- Run the bootstrap script.
-- Commit the empty scaffold or open an initial PR.
-- Fill `paper_intake.md`.
-- Add at least 10 high-value claims to `claim_ledger.csv`.
-- Fill the artefact inventory enough to identify reproduction blockers.
-- Write a one-paragraph scope statement in `README.md`.
-- Decide whether direct empirical reproduction is possible.
-- Open scoped issues or create a local task list.
+Populate the claim ledger with stable IDs. Record:
 
-## First-Week Checklist
+- paper version and location;
+- claim type and importance;
+- critical/useful/optional validation priority;
+- extraction method, confidence, and manual verification;
+- dependencies, validation method, evidence references, status, and rationale.
 
-- Finish the claim ledger for all headline claims.
-- Implement static validation for all recomputable arithmetic claims.
-- Add tests for every validation formula.
-- Smoke-test any public data source before bulk download.
-- Write a data coverage report template before fetching large data.
-- Draft the replication component mapping.
-- Create compact evidence format before running expensive jobs.
-- Preserve all negative findings in docs.
+Critical headline claims should be validated before contextual or descriptive claims.
 
-## Decision Gates
+### 3. Complete artefact and legal inventory
 
-### Gate A: Is Empirical Reproduction Possible?
+Record released and missing artefacts, their claim dependencies, licence and retention constraints, and reproduction consequences. Complete `docs/governance/data_and_licensing.md` before bulk acquisition or redistribution.
 
-Empirical reproduction is possible only if the original or equivalent artefacts exist:
+### 4. Record Gate A
 
-- raw input data;
-- preprocessing code or exact transformations;
-- model/configuration details;
-- runtime seeds or stochastic controls;
-- evaluation scripts;
-- original logs or checkpoints for live/agentic systems.
+Choose the narrowest accurate project classification:
 
-If not, downgrade scope to validation, functional replication, public-data proxy, or diagnostic reproduction.
+- direct reproduction;
+- independent replication;
+- proxy replication;
+- functional replication;
+- synthetic replication;
+- diagnostic validation.
 
-### Gate B: Is Public Data Adequate?
+If required original artefacts are absent, direct reproduction stops. Continue only where the remaining validation or implementation tests a material claim.
 
-Public data is adequate only if it covers the relevant time window, entities, schema, and granularity. If it differs materially, label it as fallback or proxy data.
+## Before implementation
 
-### Gate C: Are Metrics Well-Defined?
+### Gate B — data and legal adequacy
 
-Do not compare metrics until denominators, filters, exclusions, benchmark construction, and missing-data handling are clear.
+Smoke-test sources before bulk download. Verify exact window, entities, granularity, schema, rate limits, licence, redistribution rights, and retention. A materially different source is a proxy, not the same experiment.
 
-### Gate D: Are Outputs Auditable?
+### Gate C — claims and metrics
 
-Every run should produce enough logs, summaries, manifests, and compact evidence for another reviewer to understand what happened without full local artefacts.
+Define denominators, exclusions, missing-data handling, benchmark construction, statistical assumptions, and extraction confidence. Do not compare figures until these are explicit.
 
-## Recommended Naming Conventions
+### Gate D — implementation value
 
-Use names that preserve the project boundary:
+Map each paper component to a repository component and claim ID. Implement the smallest runnable path that can alter the conclusion. Do not build a broad architecture merely because the paper describes one.
 
-- `validation_report.md` for paper-claim checks.
-- `artifact_inventory.md` for available/missing evidence.
-- `public_data_reconstruction_report.md` for public API or dataset recovery.
-- `functional_replication_report.md` for executable architecture results.
-- `comparison_to_paper.md` for paper-vs-run comparisons.
-- `final_assessment.md` for the concluding interpretation.
+## Before expensive runs
 
-Avoid names like `reproduction_report.md` unless the original empirical artefacts are actually available.
+Complete Gate E:
 
-## Bootstrap Script Maintenance
+- static and tiny-run tests pass;
+- stochastic/LLM contracts and bounded repair/fallback paths are tested;
+- environment and dependency capture is ready;
+- cost, storage, runtime, and API budget are approved;
+- credentials are supplied through secrets rather than committed files;
+- manifests, provenance logs, summaries, and evidence bundles will be emitted;
+- stopping criteria are written.
 
-The script is intentionally dependency-free and uses only the Python standard library. Update it when the playbook changes materially.
+## Reporting and review
 
-Good future additions:
+Every promoted run should record:
 
-- optional Git initialization;
-- optional Python package or no-package layout choice;
-- optional claim-ledger JSON schema;
-- optional evidence-bundle validator.
+- commit, exact command, timestamps, OS/architecture, runtime and dependency digest;
+- container and hardware details when relevant;
+- timezone and random seeds or determinism limitations;
+- data source, coverage, selected entities, and input hashes;
+- provider/model/API versions for external services;
+- decision provenance, repairs, fallbacks, and errors where applicable;
+- output summaries, report hashes, and local-only artefacts.
 
-Keep the default scaffold small. The purpose is to force good project framing, not to generate a large framework.
+Before the final report is published, Gate F requires a clean-context reviewer to compare paper locations, extracted values, calculations, denominators, statuses, evidence, and narrative language. The reviewer records the checked commit and any required corrections in `docs/review/final_independent_review.md`.
+
+## Canonical templates
+
+The files under `docs/guides/templates/` are the canonical sources for the claim ledger, artefact inventory, validation plan, replication plan, and final report. The script loads them by default. `--template-dir` may point to a complete replacement set with the same filenames.
+
+Required template filenames:
+
+- `claim_ledger.csv`
+- `artifact_inventory.md`
+- `validation_plan.md`
+- `replication_plan.md`
+- `final_report.md`
+
+The generator fails clearly when a required template is missing.
+
+## Recommended stopping decisions
+
+- Preserve an unrecoverable data window as a negative finding rather than repeatedly retrying incompatible APIs.
+- Do not run a different model/provider and call it reproduction of the original model path.
+- Do not continue calibration solely to approach a reported metric.
+- Close author-dependent questions as unresolved after the contact period recorded in the project plan.
+- Stop expensive runs when the approved budget or evidence-quality threshold is breached.
+
+The end state is successful when the project makes the evidence boundary clearer, even when the conclusion is that the original result is not independently reproducible.
