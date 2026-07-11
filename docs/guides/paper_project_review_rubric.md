@@ -2,11 +2,7 @@
 
 Date: 2026-07-11
 
-Use this rubric at milestone reviews and final retrospectives. It grades the validation project, not the paper itself.
-
-## Scoring
-
-Score each category from 0 to 4.
+Grade the validation project, not the paper. Score each applicable category from 0 to 4.
 
 | Score | Meaning |
 | ---: | --- |
@@ -14,130 +10,77 @@ Score each category from 0 to 4.
 | 1 | Attempted but incomplete, unclear, or weakly evidenced. |
 | 2 | Adequate for a narrow internal review. |
 | 3 | Strong and reviewable, with clear limitations. |
-| 4 | Excellent, auditable, and reusable. |
+| 4 | Excellent, auditable, reusable, and independently reviewable. |
 
 ## Categories
 
-### 1. Scope Discipline
+### 1. Scope and gate discipline
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Claims reproduction without defining artefacts or boundaries. |
-| 1 | Scope exists but validation, replication, and reproduction are blurred. |
-| 2 | Scope is mostly clear, with some ambiguous language. |
-| 3 | Scope cleanly separates validation, proxy replication, functional replication, and reproduction. |
-| 4 | Scope is precise, maintained across all reports, and updated when new evidence appears. |
+0 claims reproduction without boundaries; 2 has a mostly clear scope; 3 records project classification and gate decisions; 4 maintains scope, priorities, stopping rules, and version changes throughout.
 
-### 2. Artefact Audit Quality
+### 2. Claim prioritisation and extraction quality
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Missing artefacts are ignored. |
-| 1 | Some missing artefacts are mentioned but not tied to claims. |
-| 2 | Major artefacts are inventoried. |
-| 3 | Artefacts are classified by availability and reproduction impact. |
-| 4 | Artefact inventory is complete, claim-linked, and includes a clear author request. |
+0 has no claim ledger; 2 extracts major quantitative claims; 3 adds importance, priority, locations, and extraction confidence; 4 traces every material conclusion to manually verified extraction and evidence.
 
-### 3. Claim-Ledger Coverage
+### 3. Artefact audit quality
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | No claim ledger or equivalent. |
-| 1 | Only headline claims extracted. |
-| 2 | Most quantitative claims extracted. |
-| 3 | Quantitative, benchmark, dataset, and operational claims extracted with statuses. |
-| 4 | Claim ledger is comprehensive, statused, and traceable to final conclusions. |
+0 ignores missing artefacts; 2 inventories major artefacts; 3 links availability to claim consequences; 4 provides a complete claim-linked inventory and focused author request.
 
-### 4. Static Validation Strength
+### 4. Data governance and legal fitness
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | No static checks. |
-| 1 | Manual spot checks only. |
-| 2 | Key arithmetic checks implemented. |
-| 3 | Arithmetic/statistical checks are tested and reported. |
-| 4 | Static validation is automated, tested, documented, and covers all recomputable claims. |
+0 uses data without rights or provenance review; 2 records source and licence; 3 covers redistribution, retention, terms, and sensitive-data implications; 4 records owners, expiry, external storage, and enforceable decisions.
 
-### 5. Data Reconstruction Integrity
+### 5. Static and statistical validation
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Uses data without provenance. |
-| 1 | Data source named but coverage not checked. |
-| 2 | Coverage checked for core inputs. |
-| 3 | Coverage, gaps, duplicates, failures, and fallback limits are reported. |
-| 4 | Data reconstruction is fully auditable and preserves negative findings. |
+0 has no checks; 2 implements key arithmetic; 3 tests formulas and assumptions; 4 automates all recomputable critical claims and records exact evidence.
 
-### 6. Implementation Fidelity
+### 6. Data reconstruction integrity
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Implementation is unrelated to paper method. |
-| 1 | Implements a rough demo with undocumented assumptions. |
-| 2 | Implements main components with some fidelity notes. |
-| 3 | Component mapping is explicit and assumptions are documented. |
-| 4 | Implementation is modular, tested, traceable to paper components, and honest about missing details. |
+0 uses unprovenanced substitutes; 2 checks core coverage; 3 reports gaps, duplicates, failures, and proxy limits; 4 is fully auditable and preserves negative findings and stop decisions.
 
-### 7. Metric and Accounting Correctness
+### 7. Implementation fidelity and value
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Metrics are wrong or unverifiable. |
-| 1 | Metrics are reported without denominator clarity. |
-| 2 | Major metrics have formulas. |
-| 3 | Metrics are tested, denominator-safe, and comparable to paper claims. |
-| 4 | Metric accounting is audited across stages, edge cases, and reports. |
+0 is unrelated to the paper; 2 implements main components with assumptions; 3 maps components to claims and fidelity; 4 is the smallest tested implementation needed to exercise the material claim boundary.
 
-### 8. LLM or Stochastic Provenance
+### 8. Metric and stage-accounting correctness
 
-Score this category only when applicable.
+0 reports wrong or unverifiable metrics; 2 documents formulas; 3 is denominator-safe and tested; 4 audits stages, edge cases, benchmark construction, and report consistency.
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Stochastic/LLM outputs are treated as deterministic or unexplained. |
-| 1 | Model/provider named but prompts, parameters, and failures are unclear. |
-| 2 | Basic configuration and outputs are logged. |
-| 3 | Prompt/model/configuration/fallback provenance is reported. |
-| 4 | Valid decisions, repairs, fallbacks, provider errors, and hard gates are separated in logs and metrics. |
+### 9. LLM or stochastic provenance
 
-### 9. Evidence Packaging
+Score only when applicable. 0 treats stochastic output as deterministic; 2 logs basic model/configuration; 3 separates valid output, repair, fallback, provider error, and hard gates; 4 also records context, versioning limits, uncertainty, and metrics by provenance.
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Results cannot be audited. |
-| 1 | Large local artefacts are referenced but no compact evidence exists. |
-| 2 | Reports include commands and selected outputs. |
-| 3 | Compact evidence bundles include summaries, checksums, and limitations. |
-| 4 | Evidence is complete, small, non-secret, reproducible, and linked from reports. |
+### 10. Environment, budget, and run reproducibility
 
-### 10. Reporting Honesty
+0 omits environment and cost; 2 records command and runtime; 3 captures commit, dependencies, seeds, provider versions, and budget; 4 includes deterministic digests, container/hardware details, timezone, and approval/stop thresholds.
 
-| Score | Criteria |
-| ---: | --- |
-| 0 | Overclaims reproduction or hides failures. |
-| 1 | Limitations exist but are buried. |
-| 2 | Main limitations are stated. |
-| 3 | Reports clearly separate supported, unsupported, proxy, and contradicted findings. |
-| 4 | Reports make the reproducibility boundary unmistakable and preserve negative findings. |
+### 11. Evidence packaging and reporting honesty
 
-## Grade Mapping
+0 cannot be audited or overclaims; 2 includes commands and limitations; 3 has compact evidence, checksums, claim links, and clear proxy boundaries; 4 makes the evidence boundary unmistakable and detects report drift.
 
-Use the average score across applicable categories.
+### 12. Independent conclusion review
+
+0 has no review; 2 has an informal second pass; 3 records a clean-context review against a fixed commit; 4 resolves discrepancies and independently verifies extraction, calculations, statuses, evidence, and final language.
+
+## Grade mapping
+
+Use the average across applicable categories.
 
 | Average | Grade | Interpretation |
 | ---: | --- | --- |
-| 3.7 to 4.0 | A | Excellent, auditable validation project. |
-| 3.3 to 3.69 | A- | Strong project with minor residual limits or external blockers. |
-| 2.8 to 3.29 | B+ | Useful and mostly honest, but with notable gaps. |
-| 2.3 to 2.79 | B | Adequate internal validation with meaningful weaknesses. |
-| 1.7 to 2.29 | C | Partial effort; conclusions require caution. |
-| 0 to 1.69 | D/F | Not reliable for reproduction or validation claims. |
+| 3.7–4.0 | A | Excellent, auditable validation project. |
+| 3.3–3.69 | A- | Strong project with minor residual limitations or external blockers. |
+| 2.8–3.29 | B+ | Useful and mostly honest, with notable gaps. |
+| 2.3–2.79 | B | Adequate internal validation with meaningful weaknesses. |
+| 1.7–2.29 | C | Partial effort; conclusions require caution. |
+| 0–1.69 | D/F | Not reliable for validation or reproduction claims. |
 
-## Final Assessment Template
+## Final assessment
 
 ```text
 Average score: <score>
 Grade: <grade>
+Gate status: <A-F summary>
 
-The project is strongest in <categories>. It is weakest in <categories>. The final conclusion is <supported / partially supported / unsupported / contradicted / not reproducible from available artefacts> because <reason>.
+The project is strongest in <categories> and weakest in <categories>. The evidence supports <narrow conclusion>. It does not support <broader conclusion> because <missing artefacts, material substitutions, contradiction, or review failure>.
 ```
