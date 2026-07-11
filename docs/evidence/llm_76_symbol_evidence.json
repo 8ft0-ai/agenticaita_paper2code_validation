@@ -1,0 +1,70 @@
+{
+  "schema_version": "1",
+  "scenario": "llm_76_symbol_openrouter",
+  "evidence_status": "partial_promoted_summary",
+  "report_correction_commit_sha": "991e34be44245be95594f15a5c0244c39ef1b2ff",
+  "command": "python replication/replicate.py --config replication/config.yaml --input-csv data/binanceusdm_ohlcv_large_76/replication_input_ohlcv.csv --out replication/results_real_binanceusdm_large_76_llm --agents llm --model qwen/qwen-2.5-7b-instruct --audit-log replication/results_real_binanceusdm_large_76_llm/llm_audit.jsonl",
+  "provider": "openrouter",
+  "model": "qwen/qwen-2.5-7b-instruct",
+  "data": {
+    "exchange": "binanceusdm",
+    "timeframe": "1m",
+    "start": "2026-04-06T00:00:00Z",
+    "end": "2026-04-11T23:59:59Z",
+    "selected_source_symbol_count": 76,
+    "distinct_normalised_asset_count": 69,
+    "input_rows": 656640,
+    "distinct_traded_asset_count": 10
+  },
+  "metrics": {
+    "total_invocations": 173,
+    "analyst_wait": 91,
+    "risk_approved": 11,
+    "risk_rejected": 71,
+    "risk_not_evaluated": 91,
+    "trades_executed": 11,
+    "net_pnl_usd": -7.981283722911384,
+    "win_rate_pct": 18.181818181818183,
+    "profit_factor": 0.1076409316333886,
+    "agentic_friction_pct": 93.64161849710983
+  },
+  "llm_diagnostics": {
+    "audit_rows": 184,
+    "prompt_tokens": 126404,
+    "completion_tokens": 30853,
+    "total_tokens": 157257,
+    "reported_openrouter_cost_usd": 0.0139344,
+    "analyst_fallback_warning_rows": 17
+  },
+  "promoted_reports": {
+    "llm_backed_replication_comparison_report": {
+      "path": "docs/reports/llm_backed_replication_comparison_report.md",
+      "git_blob_sha": "54c23b8970d40dfac250887ea009b0ac799a6bb4"
+    },
+    "deterministic_vs_llm_comparison": {
+      "path": "docs/reports/replication_deterministic_vs_llm_comparison.md",
+      "git_blob_sha": "f82b60263ab95731227829c221f36200a4c65b78"
+    }
+  },
+  "unavailable_legacy_hashes": [
+    "effective configuration SHA-256",
+    "selected source-symbol list SHA-256",
+    "replication input CSV SHA-256",
+    "summary.json SHA-256",
+    "trades.csv SHA-256",
+    "pipeline_log.csv SHA-256",
+    "LLM audit JSONL SHA-256",
+    "paper_replication_gap_report.md SHA-256"
+  ],
+  "local_only_artefacts": [
+    "data/binanceusdm_ohlcv_large_76/replication_input_ohlcv.csv",
+    "replication/results_real_binanceusdm_large_76_llm/",
+    "replication/results_real_binanceusdm_large_76_llm/llm_audit.jsonl"
+  ],
+  "limitations": [
+    "The source run predates compact evidence-bundle generation and its gitignored local artefacts are not available to this repository checkout.",
+    "The immutable Git blob SHAs identify the promoted reports, but they are not substitutes for the unavailable SHA-256 digests of the original local run artefacts.",
+    "Raw prompts and completions remain local because the audit log may contain sensitive or excessive content.",
+    "The provider/model differs from the paper's reported qwen3.5:9b remote Ollama path."
+  ]
+}

@@ -10,7 +10,7 @@ Prefer this split:
 
 | Keep in git | Keep local or external |
 | --- | --- |
-| Source code, tests, configuration, prompts, runbooks, and curated Markdown reports. | Raw OHLCV CSVs, SQLite databases, full replication output directories, validation result directories, coverage dumps, cache directories, and broker archives. |
+| Source code, tests, configuration, prompts, runbooks, curated Markdown reports, and compact evidence bundles under `docs/evidence/`. | Raw OHLCV CSVs, SQLite databases, full replication output directories, validation result directories, coverage dumps, cache directories, and broker archives. |
 | Small fixtures that are required by tests and are committed under a test fixture path. | Downloaded exchange data, full `pipeline_log.csv`, `trades.csv`, `vol_history.csv`, generated `summary.json`, generated replication reports, and ad hoc notebook or coverage outputs. |
 | Documentation that summarises a run, states its limitations, and links back to reproducible commands. | Large or transient data needed only to reproduce a local analysis run. |
 
@@ -29,11 +29,29 @@ The following generated artefacts should remain ignored and should not be commit
 | `.patches/` | Broker branch only. | Normal implementation patches must not include broker inbox, processed, or failed archives. |
 | `__pycache__/`, `.pytest_cache/`, `.coverage`, `*.pyc`, `.DS_Store` | Local only. | Runtime caches and local machine files. |
 
+## Compact reproducibility evidence bundles
+
+A compact evidence bundle is a small, non-secret JSON/Markdown index generated from a local run with `scripts/build_reproducibility_evidence.py`. It may be committed under `docs/evidence/` when it contains only:
+
+- the repository commit and exact command;
+- redacted effective configuration and its SHA-256 digest;
+- selected source-symbol and distinct base-asset counts;
+- input size and SHA-256 digest;
+- hashes and sizes for promoted reports and local run outputs;
+- provider/model and aggregate LLM usage, fallback, warning, and rejection counts;
+- an explicit list of artefacts retained only locally;
+- limitations that prevent stronger reproduction claims.
+
+Evidence bundles must not contain credentials, raw prompts or completions, personal temporary paths, raw market rows, or large embedded artefacts. A hash proves the identity of a retained artefact; it does not make an unavailable artefact reviewable and does not compensate for missing paper-author evidence.
+
+Runs completed before evidence-bundle support may have a `partial_promoted_summary` index. Such an index must identify exactly which legacy hashes are unavailable rather than inventing provenance.
+
 ## Summaries and reports that may be committed
 
 Commit a generated finding only after turning it into a stable repository artefact. Suitable committed outputs include:
 
 - curated Markdown reports under `docs/` that explain a validation or replication result;
+- compact JSON/Markdown evidence bundles under `docs/evidence/`;
 - small comparison tables or summaries that are directly cited by documentation;
 - small deterministic test fixtures under `tests/fixtures/` when they are required for automated tests;
 - runbooks that describe commands, inputs, limitations, and expected local outputs.
@@ -103,6 +121,6 @@ Before committing a file produced by a validation or replication command, confir
 
 - it is not under `data/`, `replication/results*/`, `validation/results*/`, or `.patches/`;
 - it is not a SQLite database, full generated CSV log, coverage dump, bytecode file, cache, or local machine file;
-- it has been intentionally promoted into `docs/` or a test fixture path;
+- it has been intentionally promoted into `docs/`, `docs/evidence/`, or a test fixture path;
 - it includes enough context for a reviewer to understand and reproduce the source run;
 - it does not contain raw exchange data, private credentials, local absolute paths, or unreleased author artefacts.

@@ -1,0 +1,54 @@
+{
+  "schema_version": "1",
+  "scenario": "deterministic_76_symbol_fallback",
+  "evidence_status": "partial_promoted_summary",
+  "report_correction_commit_sha": "991e34be44245be95594f15a5c0244c39ef1b2ff",
+  "command": "python scripts/run_real_data_replication.py --profile large --exchange binanceusdm --symbol-limit 76 --timeframe 1m --start 2026-04-06T00:00:00Z --end 2026-04-11T23:59:59Z",
+  "data": {
+    "exchange": "binanceusdm",
+    "timeframe": "1m",
+    "start": "2026-04-06T00:00:00Z",
+    "end": "2026-04-11T23:59:59Z",
+    "selected_source_symbol_count": 76,
+    "distinct_normalised_asset_count": 69,
+    "input_rows": 656640,
+    "distinct_traded_asset_count": 32
+  },
+  "metrics": {
+    "total_invocations": 173,
+    "analyst_wait": 15,
+    "risk_approved": 139,
+    "risk_rejected": 19,
+    "risk_not_evaluated": 15,
+    "trades_executed": 139,
+    "net_pnl_usd": -34.725153204272694,
+    "win_rate_pct": 34.53237410071942,
+    "profit_factor": 0.5658311128336146,
+    "agentic_friction_pct": 19.653179190751445
+  },
+  "promoted_reports": {
+    "large_universe_fallback_replication_report": {
+      "path": "docs/reports/large_universe_fallback_replication_report.md",
+      "git_blob_sha": "e15a9442127e0dc679ddca608455f5856090f30b"
+    }
+  },
+  "unavailable_legacy_hashes": [
+    "effective configuration SHA-256",
+    "selected source-symbol list SHA-256",
+    "replication input CSV SHA-256",
+    "summary.json SHA-256",
+    "trades.csv SHA-256",
+    "pipeline_log.csv SHA-256",
+    "paper_replication_gap_report.md SHA-256"
+  ],
+  "local_only_artefacts": [
+    "data/binanceusdm_ohlcv_large_76/market_data.sqlite",
+    "data/binanceusdm_ohlcv_large_76/replication_input_ohlcv.csv",
+    "replication/results_real_binanceusdm_large_76/"
+  ],
+  "limitations": [
+    "The source run predates compact evidence-bundle generation and its gitignored local artefacts are not available to this repository checkout.",
+    "The immutable Git blob SHA identifies the promoted report, but it is not a substitute for the unavailable SHA-256 digests of the original local run artefacts.",
+    "This bundle indexes retained evidence; it does not recreate missing author artefacts or upgrade the run to empirical reproduction."
+  ]
+}
