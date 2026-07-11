@@ -32,7 +32,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run stage-accounting tests
-        run: python -m pytest replication/tests/test_stage_accounting.py -q
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest replication/tests/test_stage_accounting.py -q 2>&1 | tee stage-accounting-tests.txt
 
       - name: Run validation and replication smoke checks
         shell: bash
@@ -93,6 +96,7 @@ jobs:
           name: run-results-${{ github.run_id }}
           if-no-files-found: warn
           path: |
+            stage-accounting-tests.txt
             validation/results/run_manifest.json
             validation/results/validation_report.md
             validation/results/validation_results.json
