@@ -15,8 +15,11 @@ from .cbd import CBDInputs, cbd_score
 from .contracts import AnalystDecision, ExecutionRecord, RiskDecision
 from .risk import DeterministicRiskManager, RiskConfig
 
+
 class AnalystAgent(Protocol):
     def decide(self, event, cbd, episodic_memory: list[str] | None = None) -> AnalystDecision: ...
+
+
 class RiskManagerAgent(Protocol):
     def evaluate(self, decision: AnalystDecision) -> RiskDecision: ...
 
@@ -122,8 +125,9 @@ class PipelineSimulator:
         rows = [str(r.get("analyst_reasoning", "")) for r in self.pipeline_log if r.get("asset") == asset and r.get("analyst_reasoning")]
         return rows[-self.episodic_memory_depth :] if self.episodic_memory_depth else []
 
-    def _agent_warnings(self) -> str:
-        return " | ".join(str(w) for a in (self.analyst, self.risk) if (w := getattr(a, "last_warning", "")))
+    def _agent_warnings(self, *, include_risk: bool = True) -> str:
+        agents = (self.analyst, self.risk) if include_risk else (self.analyst,)
+        return " | ".join(str(w) for agent in agents if (w := getattr(agent, "last_warning", "")))
 
     def _execute(self, timestamp: pd.Timestamp, decision, size_usd: float) -> ExecutionRecord:
         exit_result = self._exit_for_decision(timestamp, decision)
@@ -153,7 +157,7 @@ class PipelineSimulator:
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df = df.sort_values(["timestamp", "asset"]).reset_index(drop=True)
         self.execution_model = "ohlcv_intrabar_stop_take_profit" if {"high", "low"}.issubset(df.columns) else "close_only_fixed_horizon"
-        self._prices_by_asset = {asset: g.sort_values("timestamp").reset_index(drop=True) for asset, g in df.groupby("asset")}
+        self._prices_by_asset = {asset: group.sort_values("timestamp").reset_index(drop=True) for asset, group in df.groupby("asset")}
 
         for row in df.itertuples(index=False):
             timestamp = pd.Timestamp(row.timestamp)
@@ -168,8 +172,15 @@ class PipelineSimulator:
             blocked = self._cooldown_block_reason(timestamp, asset)
             if blocked:
                 self.pipeline_log.append({
-                    "timestamp": str(timestamp), "asset": asset, "event": "trigger_discarded", "reason": blocked,
-                    "z_score": event.z_score, "analyst_signal": None, "risk_approved": None,
+                    "timestamp": str(timestamp),
+                    "asset": asset,
+                    "event": "trigger_discarded",
+                    "reason": blocked,
+                    "z_score": event.z_score,
+                    "analyst_signal": None,
+                    "risk_evaluated": None,
+                    "risk_stage_status": None,
+                    "risk_approved": None,
                 })
                 continue
 
@@ -179,9 +190,8 @@ class PipelineSimulator:
             asset_prices = list(self.price_windows[asset])
             cbd = cbd_score(CBDInputs(event.z_score, asset_prices, benchmark_prices, self.config.cbd_alpha, self.config.cbd_kappa))
             analyst_decision = self.analyst.decide(event, cbd, self._episodic_memory(asset))
-            risk_decision = self.risk.evaluate(analyst_decision)
-            agent_warnings = self._agent_warnings()
-            self.pipeline_log.append({
+
+            base_log = {
                 "timestamp": str(timestamp),
                 "asset": asset,
                 "event": "trigger_admitted",
@@ -190,11 +200,30 @@ class PipelineSimulator:
                 "cbd_score": cbd.omega,
                 "analyst_signal": analyst_decision.signal,
                 "analyst_confidence": analyst_decision.confidence,
+                "analyst_reasoning": analyst_decision.reasoning,
+            }
+
+            if analyst_decision.signal == "wait":
+                self.pipeline_log.append({
+                    **base_log,
+                    "risk_evaluated": False,
+                    "risk_stage_status": "not_evaluated_analyst_wait",
+                    "risk_approved": None,
+                    "risk_rejection_reason": "",
+                    "risk_summary": "Risk Manager not evaluated because Analyst returned wait.",
+                    "agent_warnings": self._agent_warnings(include_risk=False),
+                })
+                continue
+
+            risk_decision = self.risk.evaluate(analyst_decision)
+            self.pipeline_log.append({
+                **base_log,
+                "risk_evaluated": True,
+                "risk_stage_status": "evaluated",
                 "risk_approved": risk_decision.approved,
                 "risk_rejection_reason": risk_decision.rejection_reason,
-                "analyst_reasoning": analyst_decision.reasoning,
                 "risk_summary": risk_decision.negotiation_summary,
-                "agent_warnings": agent_warnings,
+                "agent_warnings": self._agent_warnings(),
             })
             if risk_decision.approved:
                 self.trades.append(self._execute(timestamp, analyst_decision, risk_decision.size_usd).to_dict())
