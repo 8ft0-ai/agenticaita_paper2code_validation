@@ -103,4 +103,3 @@ Metadata warnings are advisory. They indicate that an issue may be missing label
 - `docs/issue_management.md` defines the issue-native operating model and label taxonomy.
 - `docs/issue_dashboard_design.md` defines the dashboard schema and grouping rules.
 - `docs/roadmap.md` remains the curated planning index.
-
