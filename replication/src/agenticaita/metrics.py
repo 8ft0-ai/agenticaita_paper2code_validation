@@ -1,7 +1,8 @@
 """Experiment summaries and statistical checks."""
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from collections import Counter
+from dataclasses import asdict, dataclass
 from typing import Iterable
 
 import pandas as pd
@@ -16,6 +17,9 @@ class Summary:
     analyst_wait: int
     risk_approved: int
     risk_rejected: int
+    risk_not_evaluated: int
+    risk_rejection_reasons: dict[str, int]
+    stage_accounting_valid: bool
     trades_executed: int
     wins: int
     losses: int
@@ -33,12 +37,38 @@ class Summary:
 
 
 def summarise(pipeline_log: pd.DataFrame, trades: pd.DataFrame) -> Summary:
-    total_invocations = int((pipeline_log["event"] == "trigger_admitted").sum()) if not pipeline_log.empty else 0
-    analyst_long = int((pipeline_log["analyst_signal"] == "long").sum()) if "analyst_signal" in pipeline_log else 0
-    analyst_short = int((pipeline_log["analyst_signal"] == "short").sum()) if "analyst_signal" in pipeline_log else 0
-    analyst_wait = int((pipeline_log["analyst_signal"] == "wait").sum()) if "analyst_signal" in pipeline_log else 0
-    risk_approved = int((pipeline_log["risk_approved"] == True).sum()) if "risk_approved" in pipeline_log else 0  # noqa: E712
-    risk_rejected = int((pipeline_log["risk_approved"] == False).sum()) if "risk_approved" in pipeline_log else 0  # noqa: E712
+    if pipeline_log.empty or "event" not in pipeline_log:
+        admitted = pd.DataFrame()
+    else:
+        admitted = pipeline_log[pipeline_log["event"] == "trigger_admitted"].copy()
+
+    total_invocations = int(len(admitted))
+    analyst_long = int((admitted["analyst_signal"] == "long").sum()) if "analyst_signal" in admitted else 0
+    analyst_short = int((admitted["analyst_signal"] == "short").sum()) if "analyst_signal" in admitted else 0
+    analyst_wait = int((admitted["analyst_signal"] == "wait").sum()) if "analyst_signal" in admitted else 0
+    directional_count = analyst_long + analyst_short
+
+    if admitted.empty:
+        risk_rows = admitted
+    elif "risk_evaluated" in admitted:
+        risk_rows = admitted[admitted["risk_evaluated"] == True]  # noqa: E712
+    elif "analyst_signal" in admitted:
+        # Backward-compatible interpretation for logs written before risk_evaluated
+        # existed: only directional Analyst decisions reached the Risk Manager.
+        risk_rows = admitted[admitted["analyst_signal"].isin(["long", "short"])]
+    else:
+        risk_rows = admitted.iloc[0:0]
+
+    risk_approved = int((risk_rows["risk_approved"] == True).sum()) if "risk_approved" in risk_rows else 0  # noqa: E712
+    risk_rejected = int((risk_rows["risk_approved"] == False).sum()) if "risk_approved" in risk_rows else 0  # noqa: E712
+    risk_not_evaluated = max(0, total_invocations - int(len(risk_rows)))
+
+    rejection_reasons: Counter[str] = Counter()
+    if "risk_rejection_reason" in risk_rows:
+        rejected = risk_rows[risk_rows["risk_approved"] == False] if "risk_approved" in risk_rows else risk_rows.iloc[0:0]  # noqa: E712
+        for value in rejected["risk_rejection_reason"].fillna("").astype(str):
+            reason = value.strip() or "unspecified"
+            rejection_reasons[reason] += 1
 
     if trades.empty:
         wins = losses = 0
@@ -54,6 +84,11 @@ def summarise(pipeline_log: pd.DataFrame, trades: pd.DataFrame) -> Summary:
     win_rate = 100.0 * wins / n if n else None
     profit_factor = gross_profit / gross_loss if gross_loss else None
     friction = 100.0 * (analyst_wait + risk_rejected) / total_invocations if total_invocations else None
+    stage_accounting_valid = (
+        analyst_long + analyst_short + analyst_wait == total_invocations
+        and risk_approved + risk_rejected <= directional_count
+        and (friction is None or friction <= 100.0)
+    )
     exact_p = binomtest(wins, n, 0.5, alternative="greater").pvalue if n else None
     z = (wins - n * 0.5) / ((n * 0.5 * 0.5) ** 0.5) if n else None
     normal_p = 1.0 - norm.cdf(z) if z is not None else None
@@ -65,6 +100,9 @@ def summarise(pipeline_log: pd.DataFrame, trades: pd.DataFrame) -> Summary:
         analyst_wait=analyst_wait,
         risk_approved=risk_approved,
         risk_rejected=risk_rejected,
+        risk_not_evaluated=risk_not_evaluated,
+        risk_rejection_reasons=dict(sorted(rejection_reasons.items())),
+        stage_accounting_valid=stage_accounting_valid,
         trades_executed=len(trades),
         wins=wins,
         losses=losses,
