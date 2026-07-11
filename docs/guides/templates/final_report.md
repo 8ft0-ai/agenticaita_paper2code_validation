@@ -1,52 +1,56 @@
 # Final Validation and Replication Report
 
-## Executive Conclusion
+## Executive conclusion
 
-TBD. Lead with what is supported, what is unsupported, and whether empirical reproduction is possible.
+Lead with the narrowest supported conclusion, the major unsupported or contradicted claims, and the exact reproduction classification.
 
-## Paper and Scope
+## Paper and frozen scope
 
-- Title: TBD
-- arXiv ID/version: TBD
+- Title: {{TITLE}}
+- arXiv ID/version: {{ARXIV_ID}} {{PAPER_VERSION}}
+- Version changes reviewed: TBD
 - Date accessed: TBD
-- Replication type: TBD
+- Project classification: TBD
 
-## Artefact Availability
-
-TBD.
-
-## Claim Validation Summary
+## Artefact, legal, and environment summary
 
 TBD.
 
-## Static Validation Results
+## Claim validation summary
+
+Summarise status by importance and priority. Link claim IDs to evidence references and state extraction confidence for material values.
+
+## Static and statistical validation
 
 TBD.
 
-## Public-Data Reconstruction
+## Public-data reconstruction or proxy analysis
 
 TBD.
 
-## Functional Replication
+## Functional or independent replication
 
 TBD.
 
-## Comparison to Paper
+## Negative findings and contradictions
 
 TBD.
 
-## Negative Findings and Contradictions
+## Evidence, commands, and run provenance
 
 TBD.
 
-## Evidence and Commands
+## Stopping decisions and unresolved author dependencies
 
 TBD.
 
-## Limitations
+## Independent conclusion review
 
-TBD.
+- Reviewer: TBD
+- Review commit: TBD
+- Gate F decision: pending
+- Corrections required: TBD
 
-## Final Assessment
+## Final assessment
 
-TBD. Use precise language: validated, functionally replicated, proxy comparison, unsupported, or not independently reproducible.
+Use precise language: direct reproduction, independent replication, proxy replication, functional replication, diagnostic validation, unsupported, contradicted, or not independently reproducible.
