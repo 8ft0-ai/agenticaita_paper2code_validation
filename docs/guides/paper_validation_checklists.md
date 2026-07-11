@@ -2,102 +2,89 @@
 
 Date: 2026-07-11
 
-Use these checklists as the fast operational companion to the full arXiv paper validation playbook.
+Use with [the operational guide](README.md). Record gate decisions rather than treating this as an informal to-do list.
 
-## Intake Checklist
+## Intake and Gate A
 
-- Record paper title, arXiv ID, version, URL, authors, and date accessed.
-- Save or reference the exact PDF/source version reviewed.
-- Identify headline claims from abstract, introduction, main tables, and conclusion.
-- Identify whether the paper is empirical, theoretical, benchmark-driven, simulation-driven, or system/demo-driven.
-- Note claims about live operation, autonomy, private data, unreleased prompts, closed models, manual intervention, or proprietary infrastructure.
-- Write a one-paragraph scope statement before implementation begins.
-- Decide whether the project target is validation, direct rerun, public-data proxy replication, functional replication, synthetic replication, or component diagnostic.
+- Freeze title, arXiv ID, paper version, URL, authors, and access date.
+- Extract headline claims from abstract, introduction, principal tables, and conclusion.
+- Assign claim importance and validation priority.
+- Record extraction method, confidence, and manual verification for material values.
+- Inventory released and missing artefacts with claim dependencies.
+- Choose direct reproduction, independent replication, proxy replication, functional replication, synthetic replication, or diagnostic validation.
+- State stopping rules and what further work could change the conclusion.
+- Record Gate A decision.
 
-## Artefact Checklist
+## Artefact, legal, and data governance
 
-- Paper PDF/source available.
-- Code repository available or explicitly absent.
-- Raw data available, externally accessible, reconstructable, or unavailable.
-- Processed data and split definitions available or unavailable.
-- Model weights, prompts, completions, checkpoints, seeds, and configuration available or unavailable.
-- Runtime logs, audit trails, tool traces, retry records, and failure records available or unavailable.
-- Evaluation scripts and benchmark construction available or unavailable.
-- Dependency versions, hardware, API versions, and external services documented or unavailable.
-- Missing artefacts have explicit reproduction consequences.
+- Original code, raw/processed data, splits, models, prompts, logs, checkpoints, and evaluation code are classified.
+- Dataset licence and redistribution rights are recorded.
+- API terms, scraping constraints, retention, and rate limits are recorded.
+- Personal or sensitive data and jurisdictional constraints are assessed.
+- Provider/model-output retention restrictions are assessed.
+- External artefact owner, location, checksum, and expiry are defined.
+- Every missing material artefact has an explicit reproduction consequence.
 
-## Claim-Ledger Checklist
+## Claim ledger and Gate C
 
-- Every headline result has a claim ID.
-- Every table metric needed for the conclusion has a claim ID.
-- Dataset sizes, filters, exclusions, and time windows have claim IDs.
-- Benchmark and baseline definitions have claim IDs.
-- Autonomy, live-operation, cost, latency, robustness, and generalization claims have claim IDs.
-- Each claim has a paper location.
-- Each claim has dependencies and a validation method.
-- Each claim status is one of `unreviewed`, `supported`, `partially_supported`, `unsupported`, `contradicted`, or `not_testable`.
-- Unsupported claims state exactly which artefact is missing.
+- Every critical headline and benchmark claim has a stable ID.
+- Dataset sizes, filters, exclusions, windows, and operational claims are represented.
+- Denominators, missing-data policy, benchmark construction, and statistical assumptions are explicit.
+- Evidence references and status rationale are recorded.
+- Status is separate from extraction confidence.
+- Gate C confirms that compared metrics are well defined.
 
-## Static Validation Checklist
+## Static and statistical validation
 
-- Recompute all reported percentages and rates.
-- Reconcile totals, subtotals, and denominators.
-- Recompute benchmark deltas and alpha claims.
-- Recompute confusion-matrix-derived metrics where possible.
-- Recompute statistical tests only when required inputs are reported.
-- Mark claims unsupported when denominators or filters are missing.
-- Add tests for every implemented formula.
-- Record exact formulas in the validation report.
+- Recompute totals, percentages, rates, benchmark deltas, and derived metrics.
+- Recompute statistical tests only when inputs and assumptions are sufficiently reported.
+- Test implemented formulas and edge cases.
+- Preserve ambiguous denominators as unsupported or unresolved rather than inferring silently.
+- Record exact formulas, commands, and results.
 
-## Data Reconstruction Checklist
+## Data reconstruction and Gate B
 
-- Smoke-test the public data source before bulk download.
-- Record endpoint, dataset version, license, schema, request parameters, and date accessed.
-- Check coverage for the exact paper time window or split.
-- Check entity/symbol/class coverage.
-- Check duplicates, gaps, missing intervals, and schema drift.
-- Preserve per-entity failures.
-- Label fallback datasets as fallback or proxy data.
-- Do not treat public-data proxy results as original empirical reproduction.
+- Smoke-test before bulk download.
+- Verify exact period, entities, granularity, schema, gaps, duplicates, and per-entity failures.
+- Record endpoint/dataset version, access date, request parameters, licence, and retention.
+- Label material substitutions as proxy data.
+- Stop historical recovery when documented limits prove the window unavailable.
+- Record Gate B decision.
 
-## Functional Replication Checklist
+## Replication design and Gate D
 
-- Map every paper component to an implementation component.
-- Record fidelity for each component: exact, inferred, proxy, synthetic, or unavailable.
+- Map paper components to implementation components and claim IDs.
+- Record fidelity as exact, inferred, proxy, synthetic, or unavailable.
+- Build the smallest implementation that can affect a material conclusion.
 - Keep deterministic and stochastic paths separate.
-- Log fallbacks and assumptions.
-- Produce run manifests, summaries, decision logs, and comparison reports.
-- Add tests for pipeline-stage accounting and metric denominators.
-- Avoid calibration unless it is labelled and justified.
+- Make assumptions, repairs, fallbacks, and calibration explicit.
+- Do not tune solely to match the headline result.
+- Record Gate D decision.
 
-## LLM and Agentic-System Checklist
+## Expensive runs and Gate E
 
-- Request exact prompts, completions, model identifiers, provider details, and sampling parameters.
-- Request tool traces, memory/retrieval context, retry rules, repair logic, and fallback policy.
-- Treat different providers or models as behavioural comparisons, not exact reproduction.
-- Validate structured model outputs field by field.
-- Distinguish valid model abstention from schema failure and deterministic fallback.
-- Log provenance categories for every decision.
-- Report contract-error histograms, repair counts, fallback counts, and provider failures.
-- Do not infer behavioural traits until integration failures are separated from valid model choices.
+- Tiny-run and contract tests pass.
+- LLM/stochastic outputs have field-level validation and bounded repair/fallback behaviour.
+- Cost, storage, runtime, credentials, and approval owner are recorded.
+- Environment capture includes OS, architecture, runtime, dependency digest, container/hardware, timezone, seeds, and provider versions.
+- Manifest, provenance, summary, report, and checksum outputs are ready.
+- Stopping conditions are written.
+- Record Gate E before the promoted run.
 
-## Evidence Checklist
+## Evidence and retention
 
-- Raw data and large generated outputs remain local by default.
-- Secrets, credentials, private provider logs, and raw completions are not committed by default.
-- Compact evidence bundles include paper identity, command, git commit, input summaries, output summaries, checksums, and limitations.
-- Reports include commands and test results.
-- Negative findings are documented as first-class outputs.
+- Large/raw data and secret-bearing logs remain local or externally retained by policy.
+- Compact evidence records command, commit, environment, inputs, outputs, hashes, and limitations.
+- Negative findings and unavailable paths are retained.
+- Reports link claim IDs to evidence.
+- Evidence drift can be detected from hashes or regeneration checks.
 
-## Final Report Checklist
+## Final report and Gate F
 
-- Lead with supported and unsupported conclusions.
-- State the paper version and access date.
-- Include artefact availability summary.
-- Include claim-ledger status summary.
-- Separate static validation, data reconstruction, and functional replication.
-- Label proxy data and synthetic data clearly.
-- State all missing artefacts required for empirical reproduction.
-- Avoid saying `reproduced` unless original artefacts and equivalent runtime context are available.
-- Include exact commands and evidence locations.
-- End with a precise conclusion about what is independently verified.
+- Lead with the narrowest supported conclusion and material unsupported/contradicted claims.
+- State frozen paper version and project classification.
+- Separate static validation, proxy reconstruction, functional implementation, and empirical findings.
+- State missing author artefacts and unresolved questions.
+- A clean-context reviewer verifies extraction, formulas, denominators, statuses, evidence, and language.
+- The reviewed commit and corrections are recorded.
+- Gate F is approved before publication or merge of the final assessment.
