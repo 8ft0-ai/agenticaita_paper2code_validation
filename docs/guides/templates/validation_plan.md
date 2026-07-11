@@ -1,36 +1,27 @@
 # Validation Plan
 
-## Goal
+## Prioritised claim boundary
 
-Validate claims that can be checked from the paper text, released artefacts, or public data. Do not conflate validation with empirical reproduction.
+| Claim IDs | Importance | Priority | Why validation could change the conclusion |
+| --- | --- | --- | --- |
+| TBD | headline/supporting/contextual | critical/useful/optional | TBD |
 
-## Static Checks
+## Static and statistical checks
 
-| Claim IDs | Check | Inputs | Expected Output | Notes |
-| --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD |
+| Claim IDs | Formula/test | Inputs | Assumptions | Expected evidence | Stop/block condition |
+| --- | --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD | TBD |
 
-## Statistical Checks
+## Public-data checks
 
-| Claim IDs | Test/Statistic | Inputs | Assumptions | Notes |
-| --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD |
+| Claim IDs | Source | Licence/terms | Coverage needed | Smoke test | Proxy boundary | Stop condition |
+| --- | --- | --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
-## Public-Data Checks
+## Extraction quality
 
-| Claim IDs | Source | Coverage Needed | Smoke Test | Notes |
-| --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD |
+Record extraction method, confidence, and manual verification for values taken from complex tables, equations, figures, or OCR.
 
-## Unsupported Claims
+## Gate C decision
 
-| Claim IDs | Missing Artefact | Consequence |
-| --- | --- | --- |
-| TBD | TBD | TBD |
-
-## Planned Outputs
-
-- validation report;
-- claim-ledger status summary;
-- machine-readable validation results;
-- negative findings where applicable.
+Metrics, denominators, exclusions, benchmark construction, and missing-data policy are: `pending`.
