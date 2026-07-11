@@ -1,0 +1,46 @@
+name: Documentation Links
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "scripts/check_markdown_links.py"
+      - "tests/test_check_markdown_links.py"
+      - ".github/workflows/docs-links.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  markdown-links:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: python -m pip install pytest
+
+      - name: Run link-checker tests
+        run: python -m pytest tests/test_check_markdown_links.py -q
+
+      - name: Validate repository-local Markdown links
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/check_markdown_links.py --root . 2>&1 | tee markdown-link-check.txt
+
+      - name: Upload link diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-link-check-${{ github.run_id }}
+          path: markdown-link-check.txt
+          if-no-files-found: warn

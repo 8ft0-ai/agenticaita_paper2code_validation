@@ -23,4 +23,4 @@ Without these artefacts, the repository can provide static audit, functional rep
 
 ## Repository policy
 
-Use `docs/artifact_retention_policy.md` as the source of truth for what stays local, what may be committed, and what should be stored externally.
+Use `docs/ci-operations/artifact_retention_policy.md` as the source of truth for what stays local, what may be committed, and what should be stored externally.
