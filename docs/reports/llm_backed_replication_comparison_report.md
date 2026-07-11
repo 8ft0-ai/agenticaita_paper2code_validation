@@ -88,16 +88,17 @@ The smoke audit contained live OpenRouter responses. The full run then completed
 | Analyst short | 86 | 66 | -20 |
 | Analyst wait | 15 | 91 | 76 |
 | Risk approved | 139 | 11 | -128 |
-| Risk rejected | 34 | 162 | 128 |
+| Risk rejected | 19 | 71 | 52 |
+| Risk not evaluated after Analyst wait | 15 | 91 | 76 |
 | Trades executed | 139 | 11 | -128 |
 | Wins | 48 | 2 | -46 |
 | Losses | 91 | 9 | -82 |
 | Net PnL USD | -34.725153204272694 | -7.981283722911384 | 26.74386948136131 |
 | Win rate percent | 34.53237410071942 | 18.181818181818183 | -16.350555918901237 |
 | Profit factor | 0.5658311128336146 | 0.1076409316333886 | -0.458190181200226 |
-| Agentic friction percent | 28.32369942196532 | 146.242774566474 | 117.91907514450868 |
+| Agentic friction percent | 19.653179190751445 | 93.64161849710983 | 73.98843930635839 |
 
-The LLM-backed run was materially more conservative than the deterministic baseline. It saw the same number of AZTE invocations, but generated far more waits and Risk Manager rejections, resulting in only 11 executed trades versus 139 in deterministic mode.
+The original generated summaries counted Analyst waits as Risk Manager rejections and then added those waits again when calculating friction. The corrected accounting treats the Risk Manager as not evaluated after a wait. Under that definition, the LLM-backed run still produced substantially more abstention and directional rejections than the deterministic baseline, resulting in only 11 executed trades versus 139. Contract failures and deterministic fallbacks mean this difference should not be attributed solely to model risk appetite.
 
 ## Paper Gap Results
 
@@ -110,7 +111,7 @@ The LLM paper gap report classified all 19 compared paper metrics as divergent.
 | Analyst short | 2 | 66 | divergent |
 | Analyst wait | 13 | 91 | divergent |
 | Risk approved | 139 | 11 | divergent |
-| Risk rejected | 5 | 162 | divergent |
+| Risk rejected | 5 | 71 | divergent |
 | Trades executed | 139 | 11 | divergent |
 | Unique traded assets | 76 | 10 | divergent |
 | Wins | 72 | 2 | divergent |
@@ -118,9 +119,10 @@ The LLM paper gap report classified all 19 compared paper metrics as divergent.
 | Net PnL USD | -15.07 | -7.981283722911384 | divergent |
 | Win rate percent | 51.8 | 18.181818181818183 | divergent |
 | Profit factor | 0.841 | 0.1076409316333886 | divergent |
+| Agentic friction percent | 11.46 | 93.64161849710983 | divergent |
 | BTC benchmark alpha USD | 3896.0 | -125.01 | divergent |
 
-The LLM run did not recover the paper's long-heavy signal profile, trade throughput, win rate, profit factor, or positive benchmark alpha.
+The LLM run did not recover the paper's long-heavy signal profile, trade throughput, win rate, profit factor, corrected friction, or positive benchmark alpha.
 
 ## LLM Usage and Fallbacks
 
