@@ -122,12 +122,20 @@ class PipelineSimulator:
         return self._close_only_exit(decision.asset, timestamp, decision.entry_price)
 
     def _episodic_memory(self, asset: str) -> list[str]:
-        rows = [str(r.get("analyst_reasoning", "")) for r in self.pipeline_log if r.get("asset") == asset and r.get("analyst_reasoning")]
+        rows = [str(row.get("analyst_reasoning", "")) for row in self.pipeline_log if row.get("asset") == asset and row.get("analyst_reasoning")]
         return rows[-self.episodic_memory_depth :] if self.episodic_memory_depth else []
 
     def _agent_warnings(self, *, include_risk: bool = True) -> str:
         agents = (self.analyst, self.risk) if include_risk else (self.analyst,)
-        return " | ".join(str(w) for agent in agents if (w := getattr(agent, "last_warning", "")))
+        return " | ".join(str(warning) for agent in agents if (warning := getattr(agent, "last_warning", "")))
+
+    @staticmethod
+    def _agent_state(agent, default_provenance: str) -> dict[str, object]:
+        return {
+            "provenance": str(getattr(agent, "last_provenance", default_provenance)),
+            "contract_error": str(getattr(agent, "last_contract_error", "")),
+            "repair_attempted": bool(getattr(agent, "last_repair_attempted", False)),
+        }
 
     def _execute(self, timestamp: pd.Timestamp, decision, size_usd: float) -> ExecutionRecord:
         exit_result = self._exit_for_decision(timestamp, decision)
@@ -178,9 +186,11 @@ class PipelineSimulator:
                     "reason": blocked,
                     "z_score": event.z_score,
                     "analyst_signal": None,
+                    "analyst_provenance": None,
                     "risk_evaluated": None,
                     "risk_stage_status": None,
                     "risk_approved": None,
+                    "risk_provenance": None,
                 })
                 continue
 
@@ -190,6 +200,7 @@ class PipelineSimulator:
             asset_prices = list(self.price_windows[asset])
             cbd = cbd_score(CBDInputs(event.z_score, asset_prices, benchmark_prices, self.config.cbd_alpha, self.config.cbd_kappa))
             analyst_decision = self.analyst.decide(event, cbd, self._episodic_memory(asset))
+            analyst_state = self._agent_state(self.analyst, "deterministic")
 
             base_log = {
                 "timestamp": str(timestamp),
@@ -201,6 +212,9 @@ class PipelineSimulator:
                 "analyst_signal": analyst_decision.signal,
                 "analyst_confidence": analyst_decision.confidence,
                 "analyst_reasoning": analyst_decision.reasoning,
+                "analyst_provenance": analyst_state["provenance"],
+                "analyst_contract_error": analyst_state["contract_error"],
+                "analyst_repair_attempted": analyst_state["repair_attempted"],
             }
 
             if analyst_decision.signal == "wait":
@@ -211,11 +225,15 @@ class PipelineSimulator:
                     "risk_approved": None,
                     "risk_rejection_reason": "",
                     "risk_summary": "Risk Manager not evaluated because Analyst returned wait.",
+                    "risk_provenance": "not_evaluated",
+                    "risk_contract_error": "",
+                    "risk_repair_attempted": False,
                     "agent_warnings": self._agent_warnings(include_risk=False),
                 })
                 continue
 
             risk_decision = self.risk.evaluate(analyst_decision)
+            risk_state = self._agent_state(self.risk, "deterministic")
             self.pipeline_log.append({
                 **base_log,
                 "risk_evaluated": True,
@@ -223,6 +241,9 @@ class PipelineSimulator:
                 "risk_approved": risk_decision.approved,
                 "risk_rejection_reason": risk_decision.rejection_reason,
                 "risk_summary": risk_decision.negotiation_summary,
+                "risk_provenance": risk_state["provenance"],
+                "risk_contract_error": risk_state["contract_error"],
+                "risk_repair_attempted": risk_state["repair_attempted"],
                 "agent_warnings": self._agent_warnings(),
             })
             if risk_decision.approved:

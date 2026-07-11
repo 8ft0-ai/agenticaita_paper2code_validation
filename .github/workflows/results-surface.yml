@@ -37,6 +37,8 @@ jobs:
           set -o pipefail
           python -m pytest \
             replication/tests/test_stage_accounting.py \
+            replication/tests/test_agents_llm.py \
+            replication/tests/test_llm_contract_diagnostics.py \
             tests/test_export_replication_input.py \
             tests/test_unique_base_asset_export.py \
             tests/test_analyse_btc_benchmark_window.py \

@@ -15,10 +15,19 @@ class Summary:
     analyst_long: int
     analyst_short: int
     analyst_wait: int
+    analyst_provenance_counts: dict[str, int]
+    analyst_signal_by_provenance: dict[str, dict[str, int]]
+    analyst_contract_error_counts: dict[str, int]
+    analyst_repair_attempted: int
     risk_approved: int
     risk_rejected: int
     risk_not_evaluated: int
+    risk_provenance_counts: dict[str, int]
+    risk_contract_error_counts: dict[str, int]
+    risk_repair_attempted: int
     risk_rejection_reasons: dict[str, int]
+    approvals_by_analyst_provenance: dict[str, int]
+    approvals_by_risk_provenance: dict[str, int]
     stage_accounting_valid: bool
     trades_executed: int
     wins: int
@@ -34,6 +43,48 @@ class Summary:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def _value_counts(frame: pd.DataFrame, column: str, *, default: str | None = None) -> dict[str, int]:
+    if frame.empty or column not in frame:
+        return {}
+    counter: Counter[str] = Counter()
+    for raw in frame[column].fillna("").astype(str):
+        value = raw.strip() or default
+        if value:
+            counter[value] += 1
+    return dict(sorted(counter.items()))
+
+
+def _error_counts(frame: pd.DataFrame, column: str) -> dict[str, int]:
+    if frame.empty or column not in frame:
+        return {}
+    counter: Counter[str] = Counter()
+    for raw in frame[column].fillna("").astype(str):
+        value = raw.strip()
+        if value:
+            # Keep diagnostics useful but bounded across provider-specific wording.
+            category = value.split(";", 1)[0][:160]
+            counter[category] += 1
+    return dict(sorted(counter.items()))
+
+
+def _signal_by_provenance(frame: pd.DataFrame) -> dict[str, dict[str, int]]:
+    if frame.empty or "analyst_signal" not in frame:
+        return {}
+    result: dict[str, Counter[str]] = {}
+    for row in frame.itertuples(index=False):
+        provenance = str(getattr(row, "analyst_provenance", "") or "legacy_or_deterministic")
+        signal = str(getattr(row, "analyst_signal", "") or "unknown")
+        result.setdefault(provenance, Counter())[signal] += 1
+    return {key: dict(sorted(counter.items())) for key, counter in sorted(result.items())}
+
+
+def _approval_counts(frame: pd.DataFrame, provenance_column: str) -> dict[str, int]:
+    if frame.empty or "risk_approved" not in frame or provenance_column not in frame:
+        return {}
+    approved = frame[frame["risk_approved"] == True]  # noqa: E712
+    return _value_counts(approved, provenance_column, default="legacy_or_deterministic")
 
 
 def summarise(pipeline_log: pd.DataFrame, trades: pd.DataFrame) -> Summary:
@@ -53,8 +104,6 @@ def summarise(pipeline_log: pd.DataFrame, trades: pd.DataFrame) -> Summary:
     elif "risk_evaluated" in admitted:
         risk_rows = admitted[admitted["risk_evaluated"] == True]  # noqa: E712
     elif "analyst_signal" in admitted:
-        # Backward-compatible interpretation for logs written before risk_evaluated
-        # existed: only directional Analyst decisions reached the Risk Manager.
         risk_rows = admitted[admitted["analyst_signal"].isin(["long", "short"])]
     else:
         risk_rows = admitted.iloc[0:0]
@@ -69,6 +118,14 @@ def summarise(pipeline_log: pd.DataFrame, trades: pd.DataFrame) -> Summary:
         for value in rejected["risk_rejection_reason"].fillna("").astype(str):
             reason = value.strip() or "unspecified"
             rejection_reasons[reason] += 1
+
+    analyst_provenance_counts = _value_counts(admitted, "analyst_provenance", default="legacy_or_deterministic")
+    analyst_signal_by_provenance = _signal_by_provenance(admitted)
+    analyst_contract_error_counts = _error_counts(admitted, "analyst_contract_error")
+    analyst_repair_attempted = int(admitted["analyst_repair_attempted"].fillna(False).astype(bool).sum()) if "analyst_repair_attempted" in admitted else 0
+    risk_provenance_counts = _value_counts(admitted, "risk_provenance", default="legacy_or_deterministic")
+    risk_contract_error_counts = _error_counts(admitted, "risk_contract_error")
+    risk_repair_attempted = int(admitted["risk_repair_attempted"].fillna(False).astype(bool).sum()) if "risk_repair_attempted" in admitted else 0
 
     if trades.empty:
         wins = losses = 0
@@ -98,10 +155,19 @@ def summarise(pipeline_log: pd.DataFrame, trades: pd.DataFrame) -> Summary:
         analyst_long=analyst_long,
         analyst_short=analyst_short,
         analyst_wait=analyst_wait,
+        analyst_provenance_counts=analyst_provenance_counts,
+        analyst_signal_by_provenance=analyst_signal_by_provenance,
+        analyst_contract_error_counts=analyst_contract_error_counts,
+        analyst_repair_attempted=analyst_repair_attempted,
         risk_approved=risk_approved,
         risk_rejected=risk_rejected,
         risk_not_evaluated=risk_not_evaluated,
+        risk_provenance_counts=risk_provenance_counts,
+        risk_contract_error_counts=risk_contract_error_counts,
+        risk_repair_attempted=risk_repair_attempted,
         risk_rejection_reasons=dict(sorted(rejection_reasons.items())),
+        approvals_by_analyst_provenance=_approval_counts(admitted, "analyst_provenance"),
+        approvals_by_risk_provenance=_approval_counts(admitted, "risk_provenance"),
         stage_accounting_valid=stage_accounting_valid,
         trades_executed=len(trades),
         wins=wins,
