@@ -16,19 +16,38 @@ from .risk import DeterministicRiskManager, RiskConfig
 LOG = logging.getLogger(__name__)
 
 ANALYST_PROMPT = """\
-You are the AgenticAITA Analyst. Analyze the market and produce a trading signal.
-Respond ONLY in JSON with this schema:
-{signal: long|short|wait, confidence: float[0,1], entry_price, stop_loss,
-take_profit, size_usd, reasoning: string}.
-Your reasoning MUST cite the composite score, volatility regime, and orderbook
-context explicitly.
+You are the AgenticAITA Analyst. Analyse the supplied market context and produce a trading signal.
+Respond ONLY with one JSON object.
+For long or short, use this schema:
+{signal: long|short, confidence: float[0,1], entry_price: positive float,
+ stop_loss: positive float, take_profit: positive float, size_usd: positive float,
+ reasoning: non-empty string}.
+For wait, use this smaller schema:
+{signal: wait, confidence: float[0,1], reasoning: non-empty string}.
+Do not emit null for a required field. Long levels must satisfy stop_loss < entry_price < take_profit.
+Short levels must satisfy take_profit < entry_price < stop_loss.
+Your reasoning MUST cite the composite score, volatility regime, and orderbook context explicitly.
+"""
+
+ANALYST_REPAIR_PROMPT = """\
+Repair one invalid AgenticAITA Analyst response. Respond ONLY with a valid JSON object.
+Preserve the intended signal when it can be made valid without inventing market facts.
+For wait, return only signal, confidence and reasoning. For long or short, return all actionable fields.
+Do not return null values. This is the only repair attempt.
 """
 
 RISK_PROMPT = """\
-You are the AgenticAITA Risk Manager. Your goal is Proportional Portfolio
-Balancing. Calculate size_usd based on the Analyst's confidence.
-Respond ONLY in JSON with this schema:
-{approved: bool, size_usd: float, negotiation_summary: string}.
+You are the AgenticAITA Risk Manager. Your goal is Proportional Portfolio Balancing.
+Respond ONLY with one JSON object.
+For approval: {approved: true, size_usd: positive float, negotiation_summary: non-empty string}.
+For rejection: {approved: false, negotiation_summary: non-empty string}.
+Do not emit null for a required field.
+"""
+
+RISK_REPAIR_PROMPT = """\
+Repair one invalid AgenticAITA Risk Manager response. Respond ONLY with a valid JSON object.
+For approval include a positive size_usd. For rejection omit size_usd. Do not return null values.
+This is the only repair attempt.
 """
 
 
@@ -42,27 +61,90 @@ class VolatilityRegimeConfig:
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "VolatilityRegimeConfig":
         raw = data or {}
-        return cls(float(raw.get("high_z_score", cls.high_z_score)), float(raw.get("active_z_score", cls.active_z_score)), float(raw.get("high_abs_return", cls.high_abs_return)), float(raw.get("active_abs_return", cls.active_abs_return)))
+        return cls(
+            float(raw.get("high_z_score", cls.high_z_score)),
+            float(raw.get("active_z_score", cls.active_z_score)),
+            float(raw.get("high_abs_return", cls.high_abs_return)),
+            float(raw.get("active_abs_return", cls.active_abs_return)),
+        )
 
 
 class LLMAnalyst:
-    def __init__(self, provider: LLMProvider, config: AnalystConfig | None = None, *, system_prompt: str | None = None, volatility_regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        provider: LLMProvider,
+        config: AnalystConfig | None = None,
+        *,
+        system_prompt: str | None = None,
+        volatility_regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None,
+    ) -> None:
         self.provider = provider
         self.fallback = RuleBasedAnalyst(config)
         self.system_prompt = system_prompt or ANALYST_PROMPT
-        self.volatility_regime_config = volatility_regime_config if isinstance(volatility_regime_config, VolatilityRegimeConfig) else VolatilityRegimeConfig.from_mapping(volatility_regime_config)
+        self.volatility_regime_config = (
+            volatility_regime_config
+            if isinstance(volatility_regime_config, VolatilityRegimeConfig)
+            else VolatilityRegimeConfig.from_mapping(volatility_regime_config)
+        )
         self.last_warning = ""
         self.last_prompt = ""
+        self.last_provenance = "not_run"
+        self.last_contract_error = ""
+        self.last_repair_attempted = False
+
+    def _reset(self) -> None:
+        self.last_warning = ""
+        self.last_provenance = "not_run"
+        self.last_contract_error = ""
+        self.last_repair_attempted = False
+
+    def _fallback_decision(
+        self,
+        event: TriggerEvent,
+        cbd: CBDResult,
+        episodic_memory: list[str] | None,
+        error: Exception,
+    ) -> AnalystDecision:
+        self.last_provenance = "deterministic_fallback"
+        self.last_warning = f"LLMAnalyst fallback to deterministic proxy: {error}"
+        LOG.warning(self.last_warning)
+        return self.fallback.decide(event, cbd, episodic_memory)
 
     def decide(self, event: TriggerEvent, cbd: CBDResult, episodic_memory: list[str] | None = None) -> AnalystDecision:
-        self.last_warning = ""
-        self.last_prompt = analyst_message(event, cbd, episodic_memory or [], self.volatility_regime_config)
+        self._reset()
+        memory = episodic_memory or []
+        self.last_prompt = analyst_message(event, cbd, memory, self.volatility_regime_config)
         try:
-            return analyst_json(self.provider.complete(self.system_prompt, self.last_prompt), event, cbd)
-        except (LLMError, TypeError, ValueError) as exc:
-            self.last_warning = f"LLMAnalyst fallback to deterministic proxy: {exc}"
-            LOG.warning(self.last_warning)
-            return self.fallback.decide(event, cbd, episodic_memory)
+            payload = self.provider.complete(self.system_prompt, self.last_prompt)
+        except LLMError as exc:
+            self.last_contract_error = str(exc)
+            return self._fallback_decision(event, cbd, episodic_memory, exc)
+
+        try:
+            decision = analyst_json(payload, event, cbd)
+            self.last_provenance = "llm_valid"
+            return decision
+        except (TypeError, ValueError) as exc:
+            self.last_contract_error = str(exc)
+            self.last_repair_attempted = True
+            repair_message = json.dumps(
+                {
+                    "validation_error": str(exc),
+                    "invalid_response": dict(payload),
+                    "market_context": json.loads(self.last_prompt),
+                },
+                sort_keys=True,
+            )
+            try:
+                repaired = self.provider.complete(ANALYST_REPAIR_PROMPT, repair_message)
+                decision = analyst_json(repaired, event, cbd)
+                self.last_provenance = "llm_repaired"
+                self.last_warning = f"LLMAnalyst repaired invalid response: {exc}"
+                LOG.warning(self.last_warning)
+                return decision
+            except (LLMError, TypeError, ValueError) as repair_exc:
+                combined = ValueError(f"initial contract error: {exc}; repair failed: {repair_exc}")
+                return self._fallback_decision(event, cbd, episodic_memory, combined)
 
 
 class LLMRiskManager:
@@ -72,12 +154,22 @@ class LLMRiskManager:
         self.system_prompt = system_prompt or RISK_PROMPT
         self.last_warning = ""
         self.last_prompt = ""
+        self.last_provenance = "not_run"
+        self.last_contract_error = ""
+        self.last_repair_attempted = False
         self.layer_a = DeterministicRiskManager(self.config)
 
-    def evaluate(self, decision: AnalystDecision) -> RiskDecision:
+    def _reset(self) -> None:
         self.last_warning = ""
+        self.last_provenance = "not_run"
+        self.last_contract_error = ""
+        self.last_repair_attempted = False
+
+    def evaluate(self, decision: AnalystDecision) -> RiskDecision:
+        self._reset()
         gate = self.layer_a.evaluate(decision)
         if not gate.approved:
+            self.last_provenance = "deterministic_hard_gate"
             return gate
 
         self.last_prompt = json.dumps(
@@ -85,11 +177,44 @@ class LLMRiskManager:
             sort_keys=True,
         )
         try:
-            return risk_json(self.provider.complete(self.system_prompt, self.last_prompt), self.config)
-        except (LLMError, TypeError, ValueError) as exc:
+            payload = self.provider.complete(self.system_prompt, self.last_prompt)
+        except LLMError as exc:
+            self.last_contract_error = str(exc)
+            self.last_provenance = "deterministic_fallback"
             self.last_warning = f"LLMRiskManager fallback to deterministic approval: {exc}"
             LOG.warning(self.last_warning)
             return gate
+
+        try:
+            result = risk_json(payload, self.config)
+            self.last_provenance = "llm_valid"
+            return result
+        except (TypeError, ValueError) as exc:
+            self.last_contract_error = str(exc)
+            self.last_repair_attempted = True
+            repair_message = json.dumps(
+                {
+                    "validation_error": str(exc),
+                    "invalid_response": dict(payload),
+                    "risk_context": json.loads(self.last_prompt),
+                },
+                sort_keys=True,
+            )
+            try:
+                repaired = self.provider.complete(RISK_REPAIR_PROMPT, repair_message)
+                result = risk_json(repaired, self.config)
+                self.last_provenance = "llm_repaired"
+                self.last_warning = f"LLMRiskManager repaired invalid response: {exc}"
+                LOG.warning(self.last_warning)
+                return result
+            except (LLMError, TypeError, ValueError) as repair_exc:
+                self.last_provenance = "deterministic_fallback"
+                self.last_warning = (
+                    "LLMRiskManager fallback to deterministic approval: "
+                    f"initial contract error: {exc}; repair failed: {repair_exc}"
+                )
+                LOG.warning(self.last_warning)
+                return gate
 
 
 def volatility_regime(event: TriggerEvent, config: VolatilityRegimeConfig | Mapping[str, Any] | None = None) -> str:
@@ -101,7 +226,12 @@ def volatility_regime(event: TriggerEvent, config: VolatilityRegimeConfig | Mapp
     return "low"
 
 
-def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str], regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None) -> str:
+def analyst_message(
+    event: TriggerEvent,
+    cbd: CBDResult,
+    memory: list[str],
+    regime_config: VolatilityRegimeConfig | Mapping[str, Any] | None = None,
+) -> str:
     return json.dumps(
         {
             "trigger": asdict(event),
@@ -109,7 +239,19 @@ def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str], regi
             "composite_score": cbd.omega,
             "volatility_regime": volatility_regime(event, regime_config),
             "orderbook_context": "not available; OHLCV trigger context is used as proxy",
+            "funding_context": "not supplied to the Analyst in this replication path",
+            "market_snapshot": {
+                "asset": event.asset,
+                "timestamp": event.timestamp,
+                "price": event.price,
+                "signed_return": event.signed_return,
+                "absolute_return": event.abs_return,
+            },
             "episodic_memory_briefing": memory[-5:] or ["No prior reasoning on this asset is available."],
+            "context_limitations": [
+                "historical L2 order-book snapshots unavailable",
+                "paper's exact prompt and full 20-bar context unavailable",
+            ],
         },
         sort_keys=True,
     )
@@ -117,15 +259,38 @@ def analyst_message(event: TriggerEvent, cbd: CBDResult, memory: list[str], regi
 
 def analyst_json(payload: Mapping[str, Any], event: TriggerEvent, cbd: CBDResult) -> AnalystDecision:
     signal = parse_signal(payload)
+    confidence = float_field(payload, "confidence", minimum=0.0, maximum=1.0)
     reasoning = text_field(payload, "reasoning")
+    if signal == "wait":
+        return AnalystDecision(
+            asset=event.asset,
+            signal=signal,
+            confidence=confidence,
+            entry_price=event.price,
+            stop_loss=event.price,
+            take_profit=event.price,
+            size_usd=0.0,
+            cbd_score=cbd.omega,
+            z_score=event.z_score,
+            reasoning=reasoning,
+        )
+
+    entry_price = float_field(payload, "entry_price", minimum=0.0, exclusive_minimum=True)
+    stop_loss = float_field(payload, "stop_loss", minimum=0.0, exclusive_minimum=True)
+    take_profit = float_field(payload, "take_profit", minimum=0.0, exclusive_minimum=True)
+    size_usd = float_field(payload, "size_usd", minimum=0.0, exclusive_minimum=True)
+    if signal == "long" and not (stop_loss < entry_price < take_profit):
+        raise ValueError("long levels must satisfy stop_loss < entry_price < take_profit")
+    if signal == "short" and not (take_profit < entry_price < stop_loss):
+        raise ValueError("short levels must satisfy take_profit < entry_price < stop_loss")
     return AnalystDecision(
         asset=event.asset,
         signal=signal,
-        confidence=float_field(payload, "confidence", minimum=0.0, maximum=1.0),
-        entry_price=float_field(payload, "entry_price", default=event.price, minimum=0.0, exclusive_minimum=True),
-        stop_loss=float_field(payload, "stop_loss", default=event.price, minimum=0.0, exclusive_minimum=True),
-        take_profit=float_field(payload, "take_profit", default=event.price, minimum=0.0, exclusive_minimum=True),
-        size_usd=float_field(payload, "size_usd", minimum=0.0),
+        confidence=confidence,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        size_usd=size_usd,
         cbd_score=cbd.omega,
         z_score=event.z_score,
         reasoning=reasoning,
@@ -138,13 +303,8 @@ def risk_json(payload: Mapping[str, Any], config: RiskConfig) -> RiskDecision:
     if not approved:
         return RiskDecision(False, 0.0, "llm_layer_b_rejected", summary)
 
-    size = float_field(payload, "size_usd", minimum=0.0, maximum=config.max_position_size_usd)
-    return RiskDecision(
-        approved=size > 0,
-        size_usd=size if size > 0 else 0.0,
-        rejection_reason="" if size > 0 else "llm_layer_b_zero_size",
-        negotiation_summary=summary,
-    )
+    size = float_field(payload, "size_usd", minimum=0.0, maximum=config.max_position_size_usd, exclusive_minimum=True)
+    return RiskDecision(True, size, "", summary)
 
 
 def parse_signal(payload: Mapping[str, Any]) -> Signal:
@@ -164,7 +324,10 @@ def bool_field(payload: Mapping[str, Any], field: str) -> bool:
 
 
 def text_field(payload: Mapping[str, Any], field: str) -> str:
-    value = str(required_field(payload, field)).strip()
+    raw = required_field(payload, field)
+    if raw is None:
+        raise ValueError(f"{field} must be a non-empty string")
+    value = str(raw).strip()
     if not value:
         raise ValueError(f"{field} must be a non-empty string")
     return value
