@@ -1,17 +1,8 @@
 # AGENTS.md
 
-## PR workflow (primary path)
+## Patch-submission workflow (primary path)
 
-Prefer the GitHub CLI (`gh`) for normal implementation work when it is available. Do not push source changes directly to `main`. Normal work should use a focused implementation branch, a concise commit, and a pull request opened with `gh pr create`.
-
-Before committing or opening a PR:
-- inspect `git status`, `git diff`, and recent commits;
-- stage only intended files;
-- run the relevant validation commands from this file or `.agents/repo-profile.md`;
-- keep changes scoped to one GitHub issue when possible;
-- use `Closes #N` only when the PR should close the issue after merge.
-
-Use the single-file `.patch-submission` envelope broker only when explicitly requested, when direct branch/PR creation is unavailable, or when a controlled broker submission is needed. Envelope submissions are written to:
+This repository uses the single-file `.patch-submission` envelope broker. Do not push source changes directly to `main`. Normal implementation work is submitted as one envelope file on the `patch-submissions` branch:
 
 ```text
 .patches/inbox/<submission-id>.patch-submission
@@ -19,12 +10,13 @@ Use the single-file `.patch-submission` envelope broker only when explicitly req
 
 The broker validates the patch, creates the implementation branch, opens the PR, and archives the submission.
 
-Envelope rules when using the broker:
+Hard rules:
+- Do not create branches or PRs manually unless explicitly instructed.
 - The only remote write is one commit to `patch-submissions` with exactly one `.patch-submission` file.
-- Do not submit while another envelope submission is unresolved.
+- Keep changes scoped to one GitHub issue. Do not submit while another submission is unresolved.
 - Never resubmit a failed envelope unchanged; regenerate from `origin/main` and use a fresh `-v2` id.
 
-Use `.agents/skills/submitting-patches-through-envelope/SKILL.md` for the full envelope procedure.
+Use `.agents/skills/submitting-patches-through-envelope/SKILL.md` for the full procedure.
 Use `.agents/repo-profile.md` for repo-specific validation commands and generated-artefact exclusions.
 
 ## Architecture: three independent modules, no package
