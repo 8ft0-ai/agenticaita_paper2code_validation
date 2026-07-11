@@ -70,7 +70,9 @@ These generated run outputs are also intentionally local and should not be commi
 | Analyst short | 86 |
 | Analyst wait | 15 |
 | Risk approved | 139 |
-| Risk rejected | 34 |
+| Risk rejected | 19 |
+| Risk not evaluated after Analyst wait | 15 |
+| Stage accounting valid | `true` |
 | Trades executed | 139 |
 | Unique traded assets | 32 |
 | Wins | 48 |
@@ -81,7 +83,9 @@ These generated run outputs are also intentionally local and should not be commi
 | Total notional USD | 26132.00 |
 | Win rate percent | 34.53237410071942 |
 | Profit factor | 0.5658311128336146 |
-| Agentic friction percent | 28.32369942196532 |
+| Agentic friction percent | 19.653179190751445 |
+
+The original generated summary counted the 15 Analyst waits as Risk Manager rejections and then added those waits again when calculating friction. The corrected accounting treats a wait as stopping before Risk Manager evaluation. The trade, PnL, win-rate, and profit-factor results are unchanged.
 
 ## Paper Gap Summary
 
@@ -101,7 +105,7 @@ The exact matches were:
 | Risk Manager approvals | 139 | 139 |
 | Executed dry-run trades | 139 | 139 |
 
-All other compared paper aggregates were divergent, including total invocations, signal mix, unique traded assets, win/loss counts, PnL, win rate, profit factor, friction, BTC benchmark PnL, and BTC benchmark alpha.
+All other compared paper aggregates were divergent, including total invocations, signal mix, unique traded assets, win/loss counts, PnL, win rate, profit factor, corrected friction, BTC benchmark PnL, and BTC benchmark alpha.
 
 ## BTC Price-Only Benchmark
 
@@ -120,9 +124,9 @@ This benchmark is price-only arithmetic. It does not reproduce the paper's fundi
 
 ## Interpretation
 
-The 76-symbol fallback run closes the largest remaining structural universe-size gap in the public functional replication. It demonstrates that the repository can process a 76-symbol public perpetual universe over the paper window and produce the required replication artefacts.
+The 76-symbol fallback run substantially expands the public functional-replication universe. It demonstrates that the repository can process 76 complete source symbols over the paper window and produce the required replication artefacts. The selected contracts normalised to 69 distinct input assets and only 32 assets traded, so this run does not reproduce the paper's 76 unique traded assets.
 
-The run does not recover the paper's reported behavior or performance. It matched the paper's approval and execution counts, but it diverged on signal mix, unique traded assets, win/loss distribution, PnL, win rate, profit factor, and benchmark alpha.
+The run does not recover the paper's reported behavior or performance. It matched the paper's approval and execution counts, but it diverged on signal mix, unique traded assets, win/loss distribution, PnL, win rate, profit factor, corrected friction, and benchmark alpha.
 
 ## Limitations
 
