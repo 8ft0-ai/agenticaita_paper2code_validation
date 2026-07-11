@@ -37,6 +37,10 @@ def run(command: list[str], *, cwd: Path, dry_run: bool) -> None:
         subprocess.run(command, cwd=cwd, check=True)
 
 
+def count_nonempty_lines(path: Path) -> int:
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--profile", choices=("baseline-15", "large"), default="baseline-15")
@@ -144,6 +148,16 @@ def main(argv: list[str] | None = None) -> int:
     if fetch_cmd:
         run(fetch_cmd, cwd=root, dry_run=args.dry_run)
     run(export_cmd, cwd=root, dry_run=args.dry_run)
+
+    if not args.dry_run and args.profile == "large":
+        available_assets = count_nonempty_lines(assets_out)
+        if available_assets < limit:
+            raise SystemExit(
+                f"Requested {limit} complete unique base assets, but only {available_assets} "
+                f"were available for {args.exchange} in the requested window. "
+                f"See {assets_out} and {symbols_out}."
+            )
+
     if replicate_cmd:
         run(replicate_cmd, cwd=root, dry_run=args.dry_run)
     if paper_compare_cmd:
