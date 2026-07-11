@@ -40,6 +40,7 @@ jobs:
             tests/test_export_replication_input.py \
             tests/test_unique_base_asset_export.py \
             tests/test_analyse_btc_benchmark_window.py \
+            tests/test_build_reproducibility_evidence.py \
             -q 2>&1 | tee targeted-replication-tests.txt
 
       - name: Run validation and replication smoke checks
