@@ -2,78 +2,76 @@
 
 Date: 2026-07-11
 
-Use this guide to keep reports precise. The wrong verb can turn a careful validation into an overclaim.
+Use the lowest claim strength supported by the evidence. Academic communities use “replication” and “reproduction” inconsistently, so every project should publish these local definitions.
 
-## Recommended Terms
+## Project classifications
 
-| Term | Use When |
+| Term | Use when |
 | --- | --- |
-| `internally consistent` | The paper's reported values agree with each other when recomputed from the text. |
-| `statically validated` | A claim is checked from paper text, tables, equations, or released static artefacts. |
-| `supported by released artefacts` | The required artefacts are available and independently checked. |
-| `public-data reconstruction` | Inputs were rebuilt from public sources, not recovered from the original run. |
-| `public-data proxy` | Public data is comparable but not the same as the paper's original data. |
-| `functional replication` | The described architecture or method was implemented and exercised. |
-| `behavioural comparison` | A different model, data source, provider, or runtime was used to compare behaviour. |
-| `direct rerun` | Original released code and data were run with minimal changes. |
-| `empirical reproduction` | Original or equivalent artefacts and runtime context were used to recover the reported result. |
-| `unsupported without artefacts` | Required data, logs, code, prompts, or configuration are missing. |
-| `not independently reproducible` | Available materials are insufficient for a third party to reproduce the original empirical result. |
-| `contradicted` | Available evidence conflicts with the paper claim or another paper statement. |
+| `static validation` | A claim is checked from the paper text, equations, tables, appendices, or released static artefacts. |
+| `direct reproduction` | The original released code, data, evaluation path, and materially equivalent runtime context are rerun. |
+| `independent replication` | The method is independently implemented using equivalent inputs and evaluation, with differences disclosed. |
+| `proxy replication` | Data, model, provider, benchmark, or runtime is materially substituted. |
+| `functional replication` | The described architecture or mechanism is implemented and exercised without empirical-equivalence claims. |
+| `synthetic replication` | Mechanics are tested under controlled artificial inputs. |
+| `diagnostic validation` | One bounded component, formula, claim, or failure mode is tested. |
+| `behavioural comparison` | A different model/provider/context is used to compare behaviour rather than reproduce it. |
 
-## Terms to Avoid Unless Strictly True
+“Equivalent” artefacts do not automatically justify a direct-reproduction claim. Material equivalence must be established for the inputs, preprocessing, model/runtime, and evaluation path; otherwise use independent or proxy replication.
+
+## Claim statuses
+
+| Status | Meaning |
+| --- | --- |
+| `supported` | Independently recomputed or observed from available evidence. |
+| `partially_supported` | A narrower claim is supported but the full claim needs missing context. |
+| `unsupported` | Required artefacts or definitions are absent. |
+| `contradicted` | Available evidence conflicts with the claim or another paper statement. |
+| `not_testable` | The assertion cannot be operationalised from the available description. |
+| `unresolved` | A material ambiguity remains, often pending author clarification. |
+
+## Terms to avoid unless strictly true
 
 | Avoid | Prefer |
 | --- | --- |
-| `we reproduced the paper` | `we functionally replicated the described method` or `we validated paper-level claims` |
-| `confirmed the result` | `the reported arithmetic is internally consistent` |
-| `same experiment` | `public-data proxy experiment` or `behavioural comparison` |
+| `we reproduced the paper` | `we directly reproduced the released experiment` or `we functionally replicated the method` |
+| `confirmed the result` | `the reported arithmetic is internally consistent` or `the claim is supported by released artefacts` |
+| `same experiment` | `independent replication` or `proxy experiment` |
 | `validated the live system` | `implemented a comparable functional pipeline` |
-| `proved the claim` | `supported this claim under the available artefacts` |
-| `failed to reproduce, so the paper is false` | `the claim is not independently reproducible from available artefacts` |
+| `proved the claim` | `supported the claim under the available evidence` |
+| `failed to reproduce, so the paper is false` | `the result is not independently reproducible from available materials` |
 
-## Claim Strength Ladder
+## Claim-strength ladder
 
-Use the lowest accurate claim strength.
+1. The claim is not testable from available materials.
+2. The claim is unsupported without additional artefacts.
+3. The paper’s arithmetic is internally consistent.
+4. The claim is supported by released artefacts.
+5. A bounded component was diagnostically validated.
+6. The method was functionally or synthetically replicated.
+7. An independent or proxy replication produced a stated result under disclosed differences.
+8. The original released experiment was directly reproduced.
 
-1. `The claim is not testable from available materials.`
-2. `The claim is unsupported without additional artefacts.`
-3. `The paper's arithmetic for this claim is internally consistent.`
-4. `The claim is supported by released artefacts.`
-5. `The described method was functionally replicated on synthetic or proxy data.`
-6. `The released code and data were directly rerun.`
-7. `The original empirical result was reproduced with original or equivalent artefacts.`
-
-## Standard Caveat Sentences
-
-Use or adapt these sentences in reports.
+## Standard caveats
 
 ```text
 This validates paper-level arithmetic, not the original empirical run.
 ```
 
 ```text
-This is a functional replication of the described architecture on public/proxy data; it is not evidence that the original live run followed the same decision path.
+This is a functional replication on public or proxy data; it is not evidence that the original run followed the same decision path.
 ```
 
 ```text
-The result is unsupported without the original dataset, runtime logs, configuration, and evaluation artefacts.
-```
-
-```text
-The fallback dataset is useful for sensitivity analysis but is not equivalent to the paper's original data source.
-```
-
-```text
-The LLM-backed run is a behavioural comparison because the original prompts, completions, model-serving configuration, and retry/fallback logs are unavailable.
+This model run is a behavioural comparison because the original prompts, model-serving version, context, completions, and retry/fallback logs are unavailable.
 ```
 
 ```text
 This negative finding narrows the reproducibility boundary; it is not evidence of misconduct.
 ```
 
-## Final Conclusion Pattern
+## Final conclusion pattern
 
 ```text
-The available evidence supports <narrow supported conclusion>. It does not support <overbroad conclusion> because <missing artefacts or contradiction>. The appropriate classification is <static validation / public-data proxy / functional replication / direct rerun / empirical reproduction / unsupported>.
+The available evidence supports <narrow conclusion>. The project classification is <classification>. It does not support <broader conclusion> because <missing artefacts, material substitutions, or contradiction>. The remaining uncertainty is <unresolved dependency>.
 ```
