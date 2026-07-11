@@ -2,473 +2,307 @@
 
 Date: 2026-07-11
 
-## Purpose
+Start with [Paper Validation Guides — Start Here](README.md). This playbook is the methodological reference. Repository commands, contribution rules, credentials, and generated-output exclusions belong in the generated `PROJECT_PROFILE.md`.
 
-Use this guide the next time we want to validate or replicate an arXiv paper. It is designed for papers where the goal is not just to produce code that resembles the method, but to make a defensible statement about what can and cannot be independently verified.
+## Purpose and standard
 
-The central rule is simple:
+The goal is to make a defensible statement about what can and cannot be independently verified. Do not treat similarity to a reported metric as reproduction.
 
-> Separate paper-claim validation, public-data reconstruction, and functional architecture replication. Do not call a result an empirical reproduction unless the original data, decisions, runtime context, and evaluation artefacts are available.
+> Separate claim validation, artefact audit, public-data reconstruction, functional implementation, and empirical rerun. Missing artefacts, unavailable historical data, malformed model output, and contradictory benchmarks are first-class findings.
 
-This playbook is intentionally conservative. It treats missing artefacts, failed data recovery, incompatible public APIs, malformed model outputs, and contradictory benchmark definitions as first-class findings rather than inconveniences to hide.
+A project succeeds when it makes the evidence boundary clearer, including when the conclusion is `not independently reproducible from available materials`.
 
-## Definitions
+## Local terminology
 
 | Term | Meaning |
 | --- | --- |
-| Static validation | Checking claims that can be recomputed from the paper text, tables, equations, appendices, and released files. |
-| Artefact audit | Inventorying what the paper releases and what it would need for full reproduction. |
-| Public-data reconstruction | Rebuilding inputs from public APIs or datasets when the original inputs are not released. |
-| Functional replication | Implementing the described architecture so it can run and produce comparable outputs. |
-| Empirical reproduction | Re-running the original experiment against the original or equivalent artefacts and recovering the reported result. |
-| Negative finding | Evidence that a requested reproduction path is impossible, unsupported, stale, unavailable, or materially under-documented. |
+| Static validation | Recomputing claims from paper text, tables, equations, appendices, or released static files. |
+| Direct reproduction | Rerunning the original released code, data, evaluation path, and materially equivalent runtime context. |
+| Independent replication | Independently implementing the method using equivalent inputs and evaluation, with differences disclosed. |
+| Proxy replication | Substituting material data, model, provider, benchmark, or runtime elements. |
+| Functional replication | Implementing and exercising the described architecture without claiming empirical equivalence. |
+| Synthetic replication | Exercising mechanics under controlled artificial inputs. |
+| Diagnostic validation | Testing one bounded claim, formula, component, or failure mode. |
+| Negative finding | Evidence that a path is unavailable, unsupported, stale, ambiguous, contradictory, or not worth continuing. |
 
-## Phase 0: Intake and Scope Decision
+Use the [claim language guide](reproduction_claim_language.md) in reports.
 
-Start by deciding what kind of project this is. Most papers will not support full empirical reproduction from the PDF alone.
+## Phase 0 — freeze scope and paper version
 
-### Intake Checklist
+Record:
 
-- Record paper title, arXiv ID, version, date accessed, authors, and claimed task.
-- Save or reference the exact PDF/source version used for the audit.
-- Identify the headline claims before reading implementation details.
-- Identify whether the paper is empirical, theoretical, benchmark-driven, simulation-driven, or system/demo-driven.
-- Note whether the paper claims live operation, autonomous operation, proprietary data, private logs, closed-source models, or unreleased prompts.
-- Decide whether the expected output is validation, replication, reproduction, or a narrower diagnostic.
+- title, arXiv ID, exact version, URL, authors, and date accessed;
+- paper type: empirical, theoretical, benchmark, simulation, system/demo, or mixed;
+- headline task and conclusions;
+- claims of live operation, autonomy, proprietary data, private logs, closed models, or manual intervention;
+- expected project classification;
+- what evidence could materially change the final conclusion.
 
-### Initial Scope Statement Template
+Freeze each milestone against one paper version. When a later version changes a material claim, add a version-diff record rather than silently replacing the ledger.
 
-```text
-This project validates and/or replicates <paper title> (<arXiv ID>, version <version>).
+### Gate A — scope and artefacts
 
-Supported goals:
-- Check arithmetic/statistical consistency of reported claims.
-- Build an executable approximation of the described method.
-- Reconstruct public-data-dependent inputs where possible.
-- Produce auditable outputs and identify missing artefacts.
+Decide:
 
-Unsupported unless authors provide artefacts:
-- Exact reproduction of private datasets, runtime logs, prompts, model outputs, human interventions, or execution-time state.
-```
+1. Is direct reproduction possible from available artefacts?
+2. Which claims are important enough to justify further work?
+3. What missing artefact stops or downgrades each path?
+4. Is functional, proxy, or diagnostic work still valuable?
 
-## Phase 1: Artefact Inventory
+Record the decision and consequence.
 
-Before writing code, inventory what exists. This prevents the project from drifting into an overclaim.
+## Phase 1 — artefact, legal, and retention audit
 
-### Artefact Categories
+Inventory paper source, code, raw and processed data, splits, runtime logs, checkpoints, prompts, completions, model versions, environment, evaluation code, and benchmark construction.
 
-| Category | Examples | Reproduction Impact |
-| --- | --- | --- |
-| Paper text | PDF, LaTeX source, appendix, tables, equations | Enables static validation. |
-| Code | Repository, scripts, notebooks, Dockerfiles | Enables direct or partial rerun. |
-| Raw data | Training data, market data, sensor logs, benchmark inputs | Required for empirical reproduction. |
-| Processed data | Feature matrices, splits, embeddings, labels | May support reproduction if provenance is clear. |
-| Runtime logs | Audit logs, run manifests, seeds, traces, checkpoints | Required to validate execution path. |
-| Model artefacts | Weights, prompts, completions, hyperparameters | Required for ML/LLM behavioural reproduction. |
-| Environment | Dependency lockfiles, hardware, API versions, exchange endpoints | Required to distinguish method differences from environment drift. |
-| Evaluation artefacts | Metrics scripts, benchmark definitions, scoring code | Required to validate headline outcomes. |
+For each artefact record:
 
-### Artefact Request Template
+- availability and location;
+- claim IDs that depend on it;
+- reproduction impact;
+- licence, API terms, redistribution, and retention constraints;
+- owner and expiry for externally retained evidence;
+- whether personal, sensitive, or jurisdictionally restricted data is present.
 
-Create an artefact request early if anything material is missing:
+### Focused author request
 
-```text
-To independently reproduce the reported experiment, we need:
+Request only artefacts material to prioritised claims. Include exact inputs and filters, transformations, splits and seeds, runtime configuration, logs and interventions, model/prompt/provider details, evaluation code, dependency/container information, and benchmark logic.
 
-1. Exact raw input dataset(s), including timestamps, symbols/entities, filters, and exclusions.
-2. Processed datasets or scripts that generate them from raw inputs.
-3. Original train/validation/test splits or sampling seeds.
-4. Full configuration used for each reported run.
-5. Runtime logs, audit traces, decisions, and failure/retry records.
-6. Model identifiers, weights, prompts, sampling parameters, and provider/server details.
-7. Evaluation scripts and benchmark construction logic.
-8. Dependency versions, hardware assumptions, and external API versions.
-9. Any manual intervention, filtering, tuning, or post-processing records.
-```
+### Gate B — data and legal adequacy
 
-### Artefact Classification
+Before bulk acquisition, confirm:
 
-Every important claim should be classified as one of:
+- exact historical window, entities, granularity, schema, and coverage;
+- licence and intended-use compatibility;
+- redistribution and sample-commit rights;
+- retention, rate limits, and scraping restrictions;
+- privacy and sensitive-data constraints.
 
-- `recomputable_from_paper`
-- `recomputable_from_released_artefacts`
-- `reconstructable_from_public_data`
-- `functionally_replicable_only`
-- `unsupported_without_author_artefacts`
-- `contradictory_or_ambiguous`
+A materially different source is a proxy. A documented retention limit that excludes the paper window is a negative finding and a stop condition for that recovery path.
 
-This classification should appear in the final report.
+## Phase 2 — prioritised claim ledger
 
-## Phase 2: Claim Ledger
-
-Build a claim ledger before implementation. This is the backbone of the validation.
-
-### What to Extract
-
-- Headline results from abstract, introduction, conclusion, and tables.
-- Counts, rates, percentages, confidence intervals, p-values, effect sizes, and benchmarks.
-- Dataset sizes, time windows, assets/classes/entities, filters, and exclusions.
-- Model names, prompts, hyperparameters, seeds, hardware, and runtime settings.
-- Claims about autonomy, zero intervention, live execution, robustness, cost, latency, or generality.
-- Any implied arithmetic relationships, such as `wins + losses = trades` or `precision = TP / (TP + FP)`.
-
-### Claim Ledger Schema
-
-Use a CSV, JSON, or Markdown table with at least these fields:
+Create stable IDs and include at least:
 
 | Field | Purpose |
 | --- | --- |
-| `claim_id` | Stable identifier such as `C001`. |
-| `location` | Paper section, page, table, figure, equation, or appendix. |
-| `claim_text` | Exact or near-exact claim. |
-| `reported_value` | Number or qualitative assertion. |
-| `dependencies` | Data, code, logs, model, benchmark, or assumptions needed. |
-| `validation_method` | Arithmetic check, statistical recomputation, code rerun, public-data reconstruction, or manual review. |
-| `status` | Supported, partially supported, unsupported, contradicted, not testable. |
-| `notes` | Caveats, missing artefacts, formula used, or reproduction boundary. |
+| `paper_version` | Version against which the claim was extracted. |
+| `location` | Page, section, table, figure, equation, or appendix. |
+| `claim_type` | Quantitative, benchmark, dataset, method, autonomy, cost, robustness, or qualitative. |
+| `claim_importance` | `headline`, `supporting`, or `contextual`. |
+| `validation_priority` | `critical`, `useful`, or `optional`. |
+| `claim_text` and `reported_value` | Exact or near-exact assertion. |
+| `dependencies` | Required data, code, logs, model, benchmark, or assumptions. |
+| `validation_method` | Arithmetic, statistical, rerun, public-data check, or manual review. |
+| `extraction_method` and `extraction_confidence` | How reliably the value was obtained. |
+| `manually_verified` | Whether a material extraction was checked against the source. |
+| `status` and `status_rationale` | Supported, partially supported, unsupported, contradicted, not testable, unresolved. |
+| `evidence_refs` | Tests, reports, manifests, files, or external sources. |
 
-### Status Rules
+Validate critical headline claims first. Exhaustive checking of contextual statistics is optional when the central conclusion is already bounded.
 
-- Use `supported` only when the claim can be independently recomputed or observed from available artefacts.
-- Use `partially_supported` when a narrower version is supported but the full claim needs missing context.
-- Use `unsupported` when required artefacts are absent.
-- Use `contradicted` when available evidence conflicts with the claim or with another paper statement.
-- Use `not_testable` when the claim is too vague to operationalize.
+### Status rules
 
-## Phase 3: Validation Plan
+- `supported`: independently recomputed or observed from available evidence;
+- `partially_supported`: a narrower claim is supported;
+- `unsupported`: required artefacts or definitions are absent;
+- `contradicted`: available evidence conflicts with the claim or another statement;
+- `not_testable`: the assertion cannot be operationalised;
+- `unresolved`: a material ambiguity remains pending clarification.
 
-Validation answers: are the paper's reported claims internally consistent and externally checkable?
+Status is separate from extraction confidence.
 
-### Static Validation
+## Phase 3 — validation plan
 
-Implement static checks first. They are cheap, deterministic, and often reveal whether the paper's own numbers cohere.
+Implement cheap, deterministic checks before a full model or system build.
 
-Good static checks include:
+### Static checks
 
-- Sums and count reconciliation.
-- Percentages and rates.
-- Profit/loss or score relationships.
-- Confusion-matrix-derived metrics.
-- Benchmark deltas and alpha calculations.
-- Confidence intervals and p-values when enough inputs are reported.
-- Sensitivity-table arithmetic.
-- Dataset split totals.
+Examples include totals, percentages, rates, metric identities, benchmark deltas, dataset splits, sensitivity-table arithmetic, confidence intervals, and reported p-values when inputs are available.
 
-Static validation should not silently infer missing denominators or hidden filters. If a formula requires an unreported value, mark the claim as unsupported or partially supported.
+Never infer a missing denominator, exclusion, or hidden filter silently.
 
-### Statistical Validation
+### Statistical checks
 
-If the paper reports significance, confidence, or distributional claims:
-
-- Recompute the reported statistic from published counts if possible.
-- Check whether the test is appropriate for the stated data generating process.
-- Check whether repeated comparisons require correction.
-- Distinguish arithmetic reproducibility from statistical validity.
-- Report exact assumptions used for any recomputation.
+Record the statistic, assumptions, dependence structure, correction for repeated comparisons, loss definition, and whether the published inputs are sufficient. Distinguish arithmetic reproducibility from appropriateness of the statistical method.
 
-### Public-Data Validation
+### Public-data smoke checks
 
-If the paper used public data, validate availability before building the model:
+Before a large download:
 
-- Confirm the endpoint, dataset, license, retention window, schema, and rate limits.
-- Run a tiny smoke fetch before a full download.
-- Record request parameters and timestamps.
-- Store coverage metadata, missing intervals, duplicate keys, and per-entity failures.
-- Check whether current public data can actually recover the paper's historical window.
-- Treat fallback data sources as comparators, not replacements for the original dataset.
+- make a tiny request;
+- record endpoint/version, parameters, date, and licence;
+- verify historical retention and schema;
+- report gaps, duplicates, missing entities, and failures;
+- define the proxy boundary before using fallback data.
 
-### Validation Report Minimum Contents
+### Gate C — claims and metrics
 
-- Paper identity and version.
-- Summary of supported, partially supported, unsupported, and contradicted claims.
-- Claim ledger or pointer to it.
-- Exact formulas used.
-- Commands run.
-- Artefacts required but missing.
-- Clear distinction between internal consistency and empirical reproduction.
+Do not compare outcomes until denominators, filters, exclusions, missing-data policy, benchmark construction, timestamps, and extraction confidence are explicit.
 
-## Phase 4: Replication Design
+## Phase 4 — replication design
 
-Replication answers: can we build an executable system that approximates the described method closely enough to produce auditable comparable artefacts?
+Map paper components to repository components before coding.
 
-### Decide the Replication Type
+| Paper component | Required decision |
+| --- | --- |
+| Inputs | Exact, inferred, proxy, synthetic, or unavailable? |
+| Preprocessing | Are order, parameters, filtering, and missing-value behaviour known? |
+| Model/agent | Are weights, prompts, provider, seeds, and version available? |
+| Runtime pipeline | Are gates, retries, concurrency, intervention, and failure behaviour known? |
+| Evaluation | Are metrics, denominators, benchmark, and post-processing equivalent? |
 
-| Type | Use When | Claim You May Make |
-| --- | --- | --- |
-| Direct rerun | Original code and data are available. | The released artefacts reproduce or fail to reproduce the reported result. |
-| Clean-room functional replication | Method is described but code/data are missing. | The described architecture can be implemented and exercised. |
-| Public-data proxy replication | Original data are missing but public proxies exist. | The method behaves this way on comparable public data. |
-| Synthetic replication | No adequate real data are available. | The implementation mechanics work under controlled inputs. |
-| Diagnostic reproduction | Only a specific component is testable. | This component is or is not consistent with the paper. |
+### Gate D — implementation value
 
-### Architecture Mapping
+Proceed only when the proposed code tests a material claim or narrows a meaningful uncertainty. Build the smallest auditable implementation that exercises that boundary.
 
-Create a mapping table before coding:
+Implementation principles:
 
-| Paper Component | Repository Component | Fidelity | Missing Details |
-| --- | --- | --- | --- |
-| Input data | Loader/exporter | Exact, proxy, synthetic, or unavailable | Source, filters, sampling, schema. |
-| Preprocessing | Transform function/script | Exact or inferred | Parameters, order, missing value policy. |
-| Model/agent | Implementation module | Exact, compatible, or proxy | Weights, prompts, seeds, provider. |
-| Decision logic | Pipeline/stage code | Exact or approximated | Hidden gates, manual overrides. |
-| Evaluation | Metric script | Exact or comparable | Benchmark construction, denominators. |
-
-### Minimal Implementation Principles
-
-- Implement the smallest runnable version that tests the claim boundary.
-- Keep deterministic and stochastic paths separate.
-- Preserve raw inputs and generated outputs locally, but commit only small curated evidence.
-- Make every fallback explicit in logs and summaries.
-- Prefer clear stage boundaries over a monolithic notebook.
-- Add tests for accounting, schema contracts, edge cases, and CLI smoke paths.
-- Do not tune toward the paper's headline result without documenting calibration as calibration.
-
-### Output Artefacts
-
-A useful replication run should produce:
-
-- Run manifest with command, git commit, config, input paths, and timestamps.
-- Input coverage report.
-- Pipeline log or per-record decision trace.
-- Summary metrics JSON.
-- Main result table in CSV or JSON.
-- Error/fallback/provenance log.
-- Human-readable report.
-- Compact evidence bundle with checksums and selected extracts.
-
-## Phase 5: LLM and Agentic Systems
-
-LLM papers need extra discipline because behaviour depends on unavailable prompts, provider state, sampling, safety filters, tool traces, and hidden retry logic.
-
-### LLM Artefacts to Request
-
-- Exact prompts, including system/developer/tool messages.
-- Model identifier, version, quantisation, provider, and endpoint.
-- Temperature, top-p, top-k, seed, max tokens, stop sequences, and tool settings.
-- Raw completions and structured parsed outputs.
-- Retry, repair, fallback, and validation rules.
-- Conversation state, memory, retrieval context, and tool outputs.
-- Safety filter or moderation outcomes.
-- Cost, token usage, latency, and provider error logs.
-
-### LLM Replication Rules
-
-- Treat a different model/provider as a behavioural comparison, not exact reproduction.
-- Validate structured outputs at field level.
-- Allow bounded repair only if logged separately from first-pass validity.
-- Distinguish valid model abstention from schema failure and deterministic fallback.
-- Log decision provenance for every stage.
-- Report contract-error histograms and fallback counts.
-- Do not describe a model as conservative, aggressive, safe, or biased until integration failures are separated from valid model choices.
-
-### LLM Provenance Categories
-
-Use categories like:
-
-- `llm_valid`
-- `llm_repaired`
-- `deterministic_fallback`
-- `provider_error_fallback`
-- `deterministic_hard_gate`
-- `not_evaluated`
-
-Summaries should show metrics by provenance, not just aggregate outcomes.
-
-## Phase 6: Evidence and Retention
-
-Large raw artefacts should usually stay local or in external storage. The repository should still contain enough compact evidence to make reports auditable.
-
-Follow the repository retention policy in [../artifact_retention_policy.md](../artifact_retention_policy.md).
-
-### Commit These
-
-- Source code, tests, configs, and small prompts/templates.
-- Claim ledgers and human-readable reports.
-- Run manifests without secrets.
-- Compact evidence bundles with checksums and selected summaries.
-- Coverage summaries and small sample extracts.
-- Documentation of failed attempts and negative findings.
-
-### Do Not Commit By Default
-
-- Full raw datasets.
-- Large generated CSVs or SQLite databases.
-- Full model audit logs if they include prompts, completions, secrets, or large volumes.
-- API credentials, private endpoints, tokens, cookies, or account identifiers.
-- Cache directories and temporary run outputs.
-
-### Compact Evidence Bundle Template
-
-```json
-{
-  "paper": {
-    "title": "...",
-    "arxiv_id": "...",
-    "version": "..."
-  },
-  "run": {
-    "command": "...",
-    "git_commit": "...",
-    "started_at": "...",
-    "finished_at": "..."
-  },
-  "inputs": {
-    "source": "...",
-    "rows": 0,
-    "entities": 0,
-    "coverage_summary": "...",
-    "checksums": {}
-  },
-  "outputs": {
-    "summary_metrics": {},
-    "result_counts": {},
-    "checksums": {}
-  },
-  "limitations": []
-}
-```
-
-## Phase 7: Testing and Verification
-
-Tests should protect the conclusions, not just the code.
-
-### Test Categories
-
-- Formula tests for every static claim calculation.
-- Parser tests for paper tables or released data files.
-- Data coverage tests for missing, duplicate, or malformed inputs.
-- Metric tests for denominators and edge cases.
-- Pipeline-stage accounting tests.
-- CLI smoke tests.
-- Golden tiny-run tests using synthetic fixtures.
-- LLM contract tests using fake providers.
-- Link validation for documentation.
-- Evidence-bundle schema tests.
-
-### Verification Before Reporting
-
-Run the relevant tests and smoke commands before writing final conclusions. Record exact commands and results in the report.
-
-If tests are split across modules, document that explicitly. A fragmented test structure is acceptable if the required commands are clear.
-
-## Phase 8: Reporting
-
-The final report should lead with what is supported, what is not supported, and why. Do not bury missing artefacts after the result tables.
-
-### Recommended Report Structure
-
-1. Executive conclusion.
-2. Scope and paper version.
-3. Artefact availability summary.
-4. Claim ledger summary.
-5. Static validation results.
-6. Public-data reconstruction results, if applicable.
-7. Functional replication design.
-8. Replication results and comparison to paper.
-9. Negative findings and contradictions.
-10. Reproducibility evidence and commands.
-11. Limitations and required author artefacts.
-12. Final assessment.
-
-### Language to Use
-
-Use precise phrases:
-
-- `internally consistent`
-- `supported by published arithmetic`
-- `supported by released artefacts`
-- `functionally replicated`
-- `public-data proxy`
-- `behavioural comparison`
-- `unsupported without original artefacts`
-- `not independently reproducible from available materials`
-
-Avoid overclaiming phrases unless strictly true:
-
-- `reproduced the paper`
-- `validated the live experiment`
-- `confirmed the authors' result`
-- `proved the system works`
-- `same data`
-- `same model behaviour`
-
-### Final Conclusion Template
+- keep deterministic and stochastic paths separate;
+- make assumptions and fallbacks explicit;
+- preserve raw inputs and full outputs locally, committing only reviewed compact evidence;
+- prefer stage boundaries and structured records over a monolithic notebook;
+- test accounting, contracts, edge cases, and CLI smoke paths;
+- label calibration as calibration;
+- never tune solely to recover the headline number.
+
+## Phase 5 — LLM and agentic systems
+
+Request exact system/developer/tool prompts, model and provider versions, quantisation, sampling parameters, tool outputs, memory/retrieval context, safety outcomes, raw structured outputs, retry/repair/fallback logic, cost, latency, and errors.
+
+Rules:
+
+- a different model or provider is a behavioural comparison or proxy;
+- validate outputs field by field;
+- allow only bounded, audited repair;
+- distinguish valid abstention, schema failure, provider failure, deterministic fallback, hard-gate rejection, and not-evaluated stages;
+- report metrics and error histograms by provenance;
+- do not label behaviour conservative, aggressive, safe, or biased until integration failures are separated from valid choices;
+- record provider-side versioning limits and whether deterministic replay is actually possible.
+
+## Phase 6 — environment, budget, and run readiness
+
+Every promoted run should record:
+
+- exact command, commit, start/end time, and timezone;
+- OS and architecture;
+- runtime version and dependency-lock digest;
+- container image digest and relevant hardware;
+- seeds and determinism limitations;
+- external model/provider/API versions;
+- input source, coverage, selected entities, size, and hashes;
+- output summaries, report hashes, errors, and local-only artefacts.
+
+Estimate runtime, storage/download volume, API/model calls, and monetary cost. Name the approval owner and threshold.
+
+### Gate E — expensive run readiness
+
+Do not start a credentialled or expensive run until:
+
+- static, tiny-run, and contract tests pass;
+- provenance and evidence capture are implemented;
+- secrets are externalised;
+- budget and stopping conditions are approved;
+- failure modes leave an auditable result rather than an ambiguous partial run.
+
+## Phase 7 — evidence and retention
+
+The universal rule is policy-driven rather than repository-path-specific. Each project must generate its own retention policy.
+
+Commit by default:
+
+- source, tests, configuration, small fixtures, and prompts safe for release;
+- claim ledgers, plans, decision logs, and reviewed reports;
+- non-secret manifests and compact evidence bundles;
+- coverage summaries and negative findings.
+
+Keep local or external by default:
+
+- full raw datasets and large generated outputs;
+- databases, checkpoints, caches, and provider logs;
+- raw prompts/completions when sensitive, secret-bearing, restricted, or high-volume;
+- credentials, cookies, account identifiers, and private endpoints.
+
+External evidence should record location, owner, checksum, and retention period.
+
+## Phase 8 — testing
+
+Tests should protect conclusions, not only code. Include as applicable:
+
+- formula and denominator tests;
+- parser and extraction fixtures;
+- data coverage and duplicate checks;
+- metric and stage-accounting tests;
+- golden tiny runs;
+- CLI smoke tests;
+- LLM contract and bounded-repair tests using fake providers;
+- evidence schema and drift tests;
+- documentation-link validation.
+
+Record exact commands and results in promoted reports.
+
+## Phase 9 — reporting
+
+Lead with what is supported, unsupported, contradicted, and unresolved.
+
+Recommended structure:
+
+1. executive conclusion;
+2. frozen paper version and scope;
+3. artefact/legal/environment summary;
+4. prioritised claim-ledger summary;
+5. static and statistical validation;
+6. data reconstruction or proxy analysis;
+7. functional/independent replication design and results;
+8. comparison to paper;
+9. negative findings and contradictions;
+10. evidence, commands, and run provenance;
+11. stopping decisions and required author artefacts;
+12. independent review;
+13. final assessment.
+
+Avoid phrases such as `we reproduced the paper`, `same experiment`, or `confirmed the live system` unless the strict definition is satisfied.
+
+## Phase 10 — independent conclusion review
+
+A reviewer working from a clean context should verify:
+
+- paper locations and extracted values;
+- formulas, denominators, filters, and benchmark definitions;
+- claim statuses and evidence references;
+- environment and run provenance;
+- consistency between machine-readable evidence and narrative reports;
+- unsupported inferences and reproduction language.
+
+Record the reviewed commit, discrepancies, corrections, and final decision.
+
+### Gate F — publishable conclusion
+
+Publish or merge the final assessment only when the clean-context review agrees that the evidence supports the language used.
+
+## Stopping rules
+
+Stop or downgrade a path when:
+
+- an indispensable original artefact is unavailable;
+- documented retention excludes the historical data;
+- a material substitution breaks equivalence;
+- repeated recovery attempts no longer add evidence;
+- further tuning is aimed only at matching the paper;
+- stochastic/LLM contracts or provenance are inadequate;
+- the run exceeds approved cost or runtime;
+- an author-dependent ambiguity reaches its recorded response deadline.
+
+Preserve the reason, evidence, and consequence.
+
+## Issue and PR workflow
+
+Use claim-scoped issues rather than one broad `replicate paper` issue. Typical work items are intake, claim ledger, static validation, data/legal smoke, component diagnostic, minimal implementation, promoted run, evidence bundle, comparison report, negative finding, and independent final review.
+
+Each PR should identify claim IDs, commands/tests, evidence outputs, limitations, stopping consequences, and whether it closes or merely informs the issue. Avoid mixing governance changes, broad documentation restructuring, implementation, and generated results without a clear necessity.
+
+## Final conclusion pattern
 
 ```text
-This repository supports a narrow conclusion: <paper title> is <internally consistent / partially consistent / contradicted> for claims that can be checked from available materials. The implemented system <does / does not> functionally approximate the described architecture on <released/public/synthetic> data. It does not independently reproduce the original empirical run because <missing artefacts> are unavailable.
+The available evidence supports <narrow conclusion>. The project classification is <direct reproduction / independent replication / proxy replication / functional replication / synthetic replication / diagnostic validation>. It does not support <broader conclusion> because <missing artefacts, material substitutions, contradiction, or review limitation>. The remaining uncertainty is <unresolved dependency>.
 ```
-
-## Phase 9: Issue Workflow
-
-Break work into small, claim-scoped issues. Avoid giant issues like `replicate paper` without sub-issues.
-
-### Useful Issue Types
-
-- `paper-intake`: identify version, scope, artefacts, and headline claims.
-- `claim-ledger`: extract and classify paper claims.
-- `static-validation`: implement arithmetic/statistical checks.
-- `data-reconstruction`: fetch or reconstruct public data and coverage reports.
-- `method-implementation`: implement one architecture component.
-- `pipeline-run`: execute an end-to-end run and preserve outputs.
-- `comparison-report`: compare implementation outputs with paper claims.
-- `negative-finding`: document unavailable data, API limits, or contradictions.
-- `evidence-bundle`: create compact committed evidence.
-- `final-assessment`: write the concluding report.
-
-### Pull Request Rules
-
-- Keep each PR scoped to one issue or one closely related claim group.
-- Include commands run and test results.
-- Include explicit limitations when touching empirical claims.
-- Do not mix source changes, generated large data, and broad documentation rewrites unless necessary.
-- If a PR discovers a new limitation, open or update an issue rather than hiding it in prose.
-
-## Common Failure Modes
-
-### Treating Functional Replication as Reproduction
-
-If original artefacts are missing, the implementation can show that a method is plausible or executable. It cannot prove that the original run happened as reported.
-
-### Silent Venue or Dataset Substitution
-
-Fallback data can be useful, but it must be labelled as fallback. Differences in venue, benchmark, schema, liquidity, retention, filtering, and timestamps can change the conclusion.
-
-### Matching Aggregate Metrics by Tuning
-
-Calibration is acceptable when labelled. It is not evidence of reproduction unless the calibrated parameters are paper-grounded or independently justified.
-
-### Ignoring Runtime Provenance
-
-For live systems, model agents, trading systems, robotics, distributed systems, or human-in-the-loop systems, aggregate outputs are not enough. The decision path matters.
-
-### Overlooking Denominators
-
-Many paper contradictions come from denominator drift: total events, eligible events, approved events, executed events, completed events, and evaluated events may all differ.
-
-### Losing Negative Findings
-
-Failed API calls, retention limits, missing archives, unsupported claims, and ambiguous benchmarks are results. Preserve them.
-
-## Quick Start Checklist
-
-Use this checklist for a new paper:
-
-1. Record paper identity and version.
-2. Extract headline claims into a claim ledger.
-3. Inventory released artefacts and missing artefacts.
-4. Classify every major claim by reproducibility status.
-5. Implement static validation before any full replication.
-6. Smoke-test data availability before large downloads.
-7. Decide direct, functional, public-data proxy, synthetic, or diagnostic replication.
-8. Build the smallest auditable implementation that exercises the claim.
-9. Log inputs, decisions, fallbacks, outputs, and metrics.
-10. Add tests for claim formulas and pipeline accounting.
-11. Generate compact evidence bundles instead of committing large outputs.
-12. Write reports that distinguish validation, replication, and reproduction.
-13. Preserve negative findings and missing artefact requirements.
-14. Run tests and documentation link validation before finalizing.
-15. End with a precise conclusion about what is supported and what remains unsupported.
-
-## Final Standard
-
-A good paper validation project should make the boundary clearer than the paper did. If the result is `not reproducible from available artefacts`, that is still a successful outcome when it is demonstrated with careful claim accounting, executable checks, preserved evidence, and honest reporting.
