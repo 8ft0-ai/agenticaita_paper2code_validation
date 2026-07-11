@@ -51,6 +51,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--market-db", default=None)
     p.add_argument("--replication-input", default=None)
     p.add_argument("--symbols-out", default=None)
+    p.add_argument("--assets-out", default=None)
     p.add_argument("--replication-out", default=None)
     p.add_argument("--paper-comparison-out", default=None)
     p.add_argument("--skip-paper-comparison", action="store_true")
@@ -74,11 +75,12 @@ def main(argv: list[str] | None = None) -> int:
     limit = args.symbol_limit or (15 if args.profile == "baseline-15" else 76)
     if limit < 1:
         raise SystemExit("--symbol-limit must be at least 1")
-    scope = "real_subset" if args.profile == "baseline-15" else f"large_{limit}"
+    scope = "real_subset" if args.profile == "baseline-15" else f"large_{limit}_unique_assets"
     market_out = Path(args.market_out or root / "data" / f"{args.exchange}_ohlcv_{scope}")
     market_db = Path(args.market_db or market_out / "market_data.sqlite")
     replication_input = Path(args.replication_input or market_out / "replication_input_ohlcv.csv")
     symbols_out = Path(args.symbols_out or market_out / f"complete_symbols_{limit}.txt")
+    assets_out = Path(args.assets_out or market_out / f"complete_assets_{limit}.txt")
     replication_out = Path(args.replication_out or root / "replication" / f"results_real_{args.exchange}_{scope}")
     paper_comparison_out = Path(args.paper_comparison_out or replication_out / "paper_replication_gap_report.md")
     symbols = args.symbols or (baseline_symbols(args.exchange) if args.profile == "baseline-15" else None)
@@ -102,8 +104,10 @@ def main(argv: list[str] | None = None) -> int:
         "--out", str(replication_input), "--exchange", args.exchange, "--timeframe", args.timeframe,
         "--format", args.export_format, "--complete-only", "--start", args.start, "--end", args.end,
         "--symbol-limit", str(limit), "--required-symbol", btc_symbol(args.exchange),
-        "--symbols-out", str(symbols_out),
+        "--symbols-out", str(symbols_out), "--assets-out", str(assets_out),
     ]
+    if args.profile == "large":
+        export_cmd.append("--unique-base-assets")
     if symbols:
         export_cmd += ["--symbols", symbols]
     if args.include_funding:
@@ -122,7 +126,20 @@ def main(argv: list[str] | None = None) -> int:
             "--out", str(paper_comparison_out),
         ]
 
-    plan = {"profile": args.profile, "exchange": args.exchange, "paths": {"market_db": str(market_db), "replication_input": str(replication_input), "replication_out": str(replication_out), "paper_comparison_out": str(paper_comparison_out)}, "commands": {"fetch": fetch_cmd, "export": export_cmd, "replicate": replicate_cmd, "paper_compare": paper_compare_cmd}}
+    plan = {
+        "profile": args.profile,
+        "exchange": args.exchange,
+        "selection_policy": "unique_base_assets" if args.profile == "large" else "explicit_baseline_symbols",
+        "paths": {
+            "market_db": str(market_db),
+            "replication_input": str(replication_input),
+            "symbols_out": str(symbols_out),
+            "assets_out": str(assets_out),
+            "replication_out": str(replication_out),
+            "paper_comparison_out": str(paper_comparison_out),
+        },
+        "commands": {"fetch": fetch_cmd, "export": export_cmd, "replicate": replicate_cmd, "paper_compare": paper_compare_cmd},
+    }
     print(json.dumps(plan, indent=2), flush=True)
     if fetch_cmd:
         run(fetch_cmd, cwd=root, dry_run=args.dry_run)
