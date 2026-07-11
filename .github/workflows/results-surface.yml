@@ -31,6 +31,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run stage-accounting tests
+        run: python -m pytest replication/tests/test_stage_accounting.py -q
+
       - name: Run validation and replication smoke checks
         shell: bash
         run: |
